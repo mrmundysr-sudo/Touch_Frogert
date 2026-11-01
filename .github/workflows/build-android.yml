@@ -73,15 +73,6 @@ jobs:
       - name: Import project
         run: godot --headless --path . --import || true
 
-      - name: Diagnostics
-        run: |
-          ls -la "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/" | head -40
-          cat "$HOME/.config/godot/editor_settings-4.3.tres"
-          ls "$ANDROID_HOME" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/ndk" || true
-          ls -la "$HOME/debug.keystore"
-          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/cmake" "$ANDROID_HOME/cmdline-tools/latest/bin" || true
-          java -version
-
       - name: Export debug APK
         run: |
           set -euo pipefail
