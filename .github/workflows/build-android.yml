@@ -9,6 +9,28 @@ env:
   GODOT_RELEASE: "4.3-stable"
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          curl -fsSL -o godot.zip "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          unzip -q godot.zip
+          sudo mv "Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          godot --version
+      - name: Import project
+        run: godot --headless --path . --import || true
+      - name: Parse-check all scripts
+        run: tools/check_scripts.sh godot
+      - name: Rule tests (determinism, restart, lives, scoring, mechanics)
+        run: godot --headless --path . -s res://tools/bots/sim_tests.gd
+      - name: Bot sweep (skilled must clear every level; others reported)
+        run: godot --headless --path . -s res://tools/bots/bot_test.gd -- 1 12 4 skilled,average,mistake
+
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 30
