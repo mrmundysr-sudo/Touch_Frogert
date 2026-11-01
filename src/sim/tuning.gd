@@ -5,6 +5,7 @@ extends RefCounted
 const DEFAULTS := {
 	# movement
 	"hop_time": 0.18,
+	"hop_map": {"up": [1, -1], "right": [1, 1], "down": [-1, 1], "left": [-1, -1]},   # swipe -> [hx, hy] (NES rotated scheme)
 	"buffer_time": 0.14,        # how long an early swipe/A press is remembered
 	"speed_mul": 1.0,           # global conveyor speed multiplier
 	"row_speed_adj": {},        # {"<row idx from top>": multiplier}
@@ -17,7 +18,7 @@ const DEFAULTS := {
 	# level generation densities (0..1) -- level 1/2 hand-tuned, rest derived by ramps
 	"water_density": 0.70, "pad_density": 0.25, "barrier_density": 0.10,
 	"sink_frac": 0.0, "fly_density": 0.45,
-	"speed_base": 0.85, "speed_per_level": 0.07, "speed_top_boost": 0.45, "speed_max": 3.2,
+	"speed_base": 0.5, "speed_per_level": 0.05, "speed_top_boost": 0.3, "speed_max": 2.4,
 	"rows_base": 7, "levels_per_row": 4, "rows_max": 10,
 	"water_ramp": 0.025, "barrier_ramp": 0.012, "sink_start_level": 3, "sink_ramp": 0.06,
 	"sink_up": 3.0, "sink_warn": 0.9, "sink_down": 1.8,

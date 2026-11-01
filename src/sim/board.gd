@@ -119,28 +119,31 @@ func consume_fly(fi: int, t: float) -> void:
 func fly_at(r: int, k: int) -> int:
 	return fly_idx.get(r * 64 + k, -1)
 
-## Plan a hop (4-way: dy=-1 up, dy=+1 down, dx=-1/+1 sideways along the row). Returns [status, row2, rel2, slot2]; status 0 = go, 1 = blocked (barrier), 2 = no such row.
-## bias: for vertical hops, the aim point is shifted this many cells toward the frog's preferred side.
-func plan_hop(r: int, rel: float, dx: int, dy: int, t: float, hop: float, bias: float = 0.0) -> PackedFloat64Array:
-	var tl := t + hop
-	if dy == 0:
-		var rel2 := rel + float(dx)
-		var k2 := slot_of_rel(r, rel2)
-		if slots[r][k2] == BARRIER:
-			return PackedFloat64Array([1.0, r, rel2, k2])
-		return PackedFloat64Array([0.0, r, rel2, k2])
-	var r2 := r + dy
+## Plan a hop on the FIXED cube grid.  (hx, hy) is the hop vector: hy = -1 up a row / +1 down a row,
+## hx = -1 / +1 left / right neighbour.  The destination is the neighbouring CUBE; the frog lands on that
+## cube's centre, and the moving surface is sampled at that point when he touches down.
+## Returns [status, row2, rel2, slot2, origin_cube, dest_cube]
+##   status 0 = go (the landing itself may be a fall/drown), 1 = blocked by a barrier, 2 = no such row.
+func plan_hop(r: int, rel: float, hx: int, hy: int, t: float, hop: float) -> PackedFloat64Array:
+	var r2 := r + hy
 	if r2 < 0 or r2 >= n:
-		return PackedFloat64Array([2.0, r, rel, 0])
-	var wx0 := rel + raw(r, t) - float(w[r]) * 0.5
-	var xa := wx0 + bias + float(w[r2]) * 0.5
-	var u := fposmod(xa - raw(r2, tl), float(L[r2]))
-	var k2 := int(floor(u))
-	var xl := xa + (0.5 - (u - float(k2)))
-	var rel2 := xl - raw(r2, tl)
-	if xl >= 0.0 and xl <= float(w[r2]) and slots[r2][k2] == BARRIER:
-		return PackedFloat64Array([1.0, r2, rel2, k2])
-	return PackedFloat64Array([0.0, r2, rel2, k2])
+		return PackedFloat64Array([2.0, r, rel, 0, 0, 0])
+	var c := cube_under(r, rel, t)
+	var c2 := c + (hx + hy) / 2
+	var tl := t + hop
+	var rel2 := float(c2) + 0.5 - raw(r2, tl)
+	var k2 := slot_of_rel(r2, rel2)
+	if c2 >= 0 and c2 < w[r2] and slots[r2][k2] == BARRIER:
+		return PackedFloat64Array([1.0, r2, rel2, k2, c, c2])
+	return PackedFloat64Array([0.0, r2, rel2, k2, c, c2])
+
+## index of the fixed cube under the frog's feet (may be outside 0..w-1 if he is over the edge)
+func cube_under(r: int, rel: float, t: float) -> int:
+	return int(floor(rel + raw(r, t)))
+
+## slot of the moving surface lying over the centre of cube c at time t
+func slot_over_cube(r: int, c: int, t: float) -> int:
+	return int(floor(fposmod(float(c) + 0.5 - raw(r, t), float(L[r]))))
 
 ## What happens to a frog that lands/stands at (r, rel) at time t.
 func landing_result(r: int, rel: float, t: float, carrying: bool) -> int:

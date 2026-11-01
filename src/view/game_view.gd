@@ -17,6 +17,7 @@ var banner_t := 0.0
 var demo_label := false
 var caption := ""
 var caption_dir := Vector2i.ZERO
+var show_sprites := false
 var show_labels := false        # dev/demo: show row direction + "carried" labels
 var W := 70.0                   # cube width in px
 var Hs := 43.0                  # cube side height
@@ -86,11 +87,9 @@ func layout() -> void:
 func spos(row_f: float, wx: float) -> Vector2:
 	return Vector2(cx + wx * W, y_top + row_f * P)
 
-## centre of the top face of slot k in row r (moves with the conveyor)
-func slot_screen(r: int, k: int) -> Vector2:
-	var b := sim.board
-	var xl := fposmod(float(k) + 0.5 + b.raw(r, sim.t), float(b.L[r]))
-	return spos(float(r), xl - float(b.w[r]) * 0.5)
+## centre of the top face of FIXED cube c in row r
+func cube_screen(r: int, c: int) -> Vector2:
+	return spos(float(r), float(c) + 0.5 - float(sim.board.w[r]) * 0.5)
 
 # ------------------------------------------------------------------ events -> particles
 
@@ -112,8 +111,8 @@ func on_event(ev: Array) -> void:
 		"land": burst(fp + Vector2(0, W * 0.3), Color(0.8, 0.95, 1.0, 0.8), 5, 90.0, 0.35)
 		"catch": burst(fp, Color("ffe14d"), 12, 200.0); flash = 0.15; flash_col = Color(1, 1, 0.6)
 		"shoot": burst(fp, Color("ff9d00"), 10, 260.0, 0.4)
-		"barrier_down": burst(slot_screen(ev[1], ev[2]) + Vector2(0, -W * 0.3), Color("b9b6d3"), 18, 280.0, 0.7); shake = 0.25
-		"fly_zap": burst(slot_screen(ev[1], ev[2]) + Vector2(0, -W * 0.4), Color("ff3d71"), 14, 240.0)
+		"barrier_down": burst(cube_screen(ev[1], ev[2]) + Vector2(0, -W * 0.3), Color("b9b6d3"), 18, 280.0, 0.7); shake = 0.25
+		"fly_zap": burst(cube_screen(ev[1], ev[2]) + Vector2(0, -W * 0.4), Color("ff3d71"), 14, 240.0)
 		"die":
 			shake = 0.5
 			flash = 0.35
@@ -171,72 +170,163 @@ func _palette(r: int, kind: String) -> Array:
 	match kind:
 		"summit": return [Color("ffd75a"), Color("a9741a"), Color("d19a2c")]
 		"start": return [Color("5fb04a"), Color("2e6a2c"), Color("3f8a38")]
-		"river": return [Color(0.38 + lift, 0.64 + lift, 0.7 + lift), Color("1d3f52"), Color("2d5c70")]
+		"river": return [Color(0.12, 0.38 + lift, 0.72 + lift), Color("1d3f52"), Color("2d5c70")]
 		_: return [Color(0.4 + lift, 0.76 + lift, 0.34 + lift), Color("22592a"), Color("30803a")]
+
+const WATER_TOP := Color("1b6fc4")
+const WATER_RIP := Color("3f93e6")
+
+static func _area(poly: PackedVector2Array) -> float:
+	var a := 0.0
+	var n := poly.size()
+	for i in n:
+		var p := poly[i]
+		var q := poly[(i + 1) % n]
+		a += p.x * q.y - q.x * p.y
+	return absf(a) * 0.5
+
+## Fill `poly` (a convex region in row-local px) clipped to the moving surface's cube tops.
+## `dia` = cached diamond polygons per cube. Returns the clipped pieces so callers can add shading.
+func _fill_on_tops(ci: Control, dia: Array, poly: PackedVector2Array, xa: float, xb: float, col: Color, w: int) -> Array:
+	var pieces: Array = []
+	var c0 := maxi(0, int(floor(xa)))
+	var c1 := mini(w - 1, int(floor(xb - 0.0001)))
+	for c in range(c0, c1 + 1):
+		var res: Array = Geometry2D.intersect_polygons(dia[c], poly)
+		for piece in res:
+			if piece.size() >= 3 and _area(piece) > 1.5:
+				ci.draw_colored_polygon(piece, col)
+				pieces.append(piece)
+	return pieces
+
+func _slab_poly(xa: float, xb: float, y0: float) -> PackedVector2Array:
+	var b := W * 0.25
+	return PackedVector2Array([Vector2(xa * W, y0 - b - 1.0), Vector2(xb * W, y0 - b - 1.0), Vector2(xb * W, y0 + b + 1.0), Vector2(xa * W, y0 + b + 1.0)])
+
+func _ellipse_poly(c: Vector2, rx: float, ry: float, n: int = 16) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
+	return pts
 
 func draw_row(ci: Control, r: int) -> void:
 	var b := sim.board
-	var w := float(b.w[r])
+	var w: int = b.w[r]
 	var is_start := r == b.n - 1
 	var is_top := r == 0
 	var kind: String = "start" if is_start else ("summit" if is_top else String(sim.level["rows"][r].get("kind", "ground")))
 	var pal := _palette(r, kind)
-	var raw := b.raw(r, sim.t)
 	var org := ci.position
-	var order: Array = []
-	for k in int(b.L[r]):
-		var xl := fposmod(float(k) + 0.5 + raw, float(b.L[r]))
-		if xl < -0.6 or xl > w + 0.6:
-			continue
-		order.append([xl, k])
-	order.sort_custom(func(a, c): return a[0] < c[0])
-	var dir := signf(b.speed[r])
-	for o in order:
-		var xl2: float = o[0]
-		var k2: int = o[1]
-		var c := Vector2(xl2 * W, y_top + r * P - org.y)
-		var base: int = b.slots[r][k2]
-		var cont := b.content(r, k2, sim.t)
-		var shade := 1.0 if (k2 % 2 == 0) else 0.94
-		var top_c: Color = (pal[0] as Color) * Color(shade, shade, shade, 1.0)
-		match base:
-			Board.WATER:
-				Art.water_pit(ci, c, W, Hs, W * 0.3, time, float(k2), pal[1], pal[2])
-			Board.SINK:
+	var y0 := y_top + r * P - org.y                     # local y of this row's top-face centres
+	var qb := W * 0.25
+	var moving: bool = not (is_start or is_top)
+	# ---- 1. permanent structure: fixed cubes (never move, never wrap)
+	var dia: Array = []
+	for c in w:
+		var cc := Vector2((float(c) + 0.5) * W, y0)
+		var shade := 1.0 if (c % 2 == 0) else 0.95
+		Art.cube(ci, cc, W, Hs, (pal[0] as Color) * Color(shade, shade, shade, 1.0), pal[1], pal[2])
+		dia.append(PackedVector2Array([cc + Vector2(0, -qb), cc + Vector2(W * 0.5, 0), cc + Vector2(0, qb), cc + Vector2(-W * 0.5, 0)]))
+	# ---- 2. moving playable surface, flush with the cube tops and clipped to them
+	var raw := b.raw(r, sim.t)
+	var objs: Array = []
+	if moving:
+		var Lr: int = b.L[r]
+		var river := kind == "river"
+		for k in Lr:
+			var xl := fposmod(float(k) + 0.5 + raw, float(Lr))
+			if xl < -0.5 or xl > float(w) + 0.5:
+				continue
+			var xa := maxf(xl - 0.5, 0.0)
+			var xb := minf(xl + 0.5, float(w))
+			if xb - xa < 0.01:
+				continue
+			var base: int = b.slots[r][k]
+			var cont := b.content(r, k, sim.t)
+			var slab := _slab_poly(xa, xb, y0)
+			if river:
+				# whole row is a pool; the surface layer is a scrolling ripple band + floating pads
+				if k % 2 == 0:
+					_fill_on_tops(ci, dia, slab, xa, xb, Color(WATER_RIP.r, WATER_RIP.g, WATER_RIP.b, 0.22), w)
+				if cont != Board.WATER:
+					var wob := b.sink_warning(r, k, sim.t)
+					var sunk := 1.0 if (base == Board.SINK and wob > 0.0) else 0.0
+					var pc := Vector2(xl * W + (sin(time * 30.0) * wob * 2.0), y0 - 1.0 + wob * W * 0.05)
+					var rx := W * (0.4 - 0.08 * wob)
+					var ry := W * (0.19 - 0.04 * wob)
+					var ring := _ellipse_poly(pc + Vector2(0, 2), rx + 2.0, ry + 1.5)
+					var body := _ellipse_poly(pc, rx, ry)
+					var padc := Color("39b54a") if base != Board.SINK else Color("2fa26b")
+					for c in range(maxi(0, int(floor(xl - 0.5))), mini(w - 1, int(floor(xl + 0.5))) + 1):
+						for piece in Geometry2D.intersect_polygons(dia[c], ring):
+							if piece.size() >= 3 and _area(piece) > 1.0:
+								ci.draw_colored_polygon(piece, Color("1f7a31"))
+						for piece in Geometry2D.intersect_polygons(dia[c], body):
+							if piece.size() >= 3 and _area(piece) > 1.0:
+								ci.draw_colored_polygon(piece, padc.lerp(Color("e8c23a"), wob * 0.6))
+					if k % 5 == 0 and base != Board.SINK:
+						var fl := _ellipse_poly(pc + Vector2(rx * 0.35, -ry * 0.5), W * 0.06, W * 0.04, 8)
+						var cf := clampi(int(floor(xl + 0.35)), 0, w - 1)
+						for piece in Geometry2D.intersect_polygons(dia[cf], fl):
+							if piece.size() >= 3 and _area(piece) > 0.5:
+								ci.draw_colored_polygon(piece, Color(1, 0.6, 0.85))
+			else:
+				# ground row: green top; water gaps are bevelled blue slabs
 				if cont == Board.WATER:
-					Art.water_pit(ci, c, W, Hs, W * 0.3, time, float(k2), pal[1], pal[2])
+					var pieces := _fill_on_tops(ci, dia, slab, xa, xb, WATER_TOP, w)
+					for piece in pieces:
+						# recess illusion: dark shadow under the back rim + a light lip on the front rim
+						var sh_poly := PackedVector2Array()
+						for v in piece:
+							sh_poly.append(v + Vector2(0, W * 0.16))
+						for sp in Geometry2D.clip_polygons(piece, sh_poly):
+							if sp.size() >= 3 and _area(sp) > 1.0:
+								ci.draw_colored_polygon(sp, Color(0.0, 0.05, 0.25, 0.6))
+					# bevelled walls at the slab ends (vertical lines through the diamond)
+					for ex in [xl - 0.5, xl + 0.5]:
+						if ex > 0.0 and ex < float(w):
+							var cidx := clampi(int(floor(ex)), 0, w - 1)
+							var cx_ := (float(cidx) + 0.5) * W
+							var hh := qb * (1.0 - absf(ex * W - cx_) / (W * 0.5))
+							if hh > 2.0:
+								ci.draw_line(Vector2(ex * W, y0 - hh), Vector2(ex * W, y0 + hh), Color(0.02, 0.1, 0.3, 0.9), 3.0)
+								ci.draw_line(Vector2(ex * W + 2, y0 - hh), Vector2(ex * W + 2, y0 + hh), Color(1, 1, 1, 0.18), 1.5)
 				else:
-					var wob := b.sink_warning(r, k2, sim.t)
-					var cc := c + Vector2(0, wob * W * 0.1)
-					Art.cube(ci, cc, W, Hs, top_c, pal[1], pal[2])
-					Art.pad_on_top(ci, cc, W, k2, wob, time, true)
-			Board.BARRIER:
-				Art.cube(ci, c, W, Hs, top_c, pal[1], pal[2])
-				Art.stone_block(ci, c, W)
-			_:
-				Art.cube(ci, c, W, Hs, top_c, pal[1], pal[2])
-				if kind == "river":
-					Art.pad_on_top(ci, c, W, k2, 0.0, time, false)
-				elif dir != 0.0:
-					# faint chevron on the top face shows the conveyor direction
-					var q := c + Vector2(0, -1)
-					ci.draw_polyline(PackedVector2Array([q + Vector2(-dir * W * 0.1, -W * 0.07), q + Vector2(dir * W * 0.08, 0), q + Vector2(-dir * W * 0.1, W * 0.07)]), Color(1, 1, 1, 0.22), 2.0)
-	# flies travel with their slots
+					if k % 2 == 0:
+						_fill_on_tops(ci, dia, slab, xa, xb, Color(1, 1, 0.8, 0.20), w)
+					else:
+						_fill_on_tops(ci, dia, slab, xa, xb, Color(0, 0.12, 0, 0.18), w)
+					# conveyor segment seam (vertical line through the diamond the seam is currently over)
+					var sx_ := xl - 0.5
+					if sx_ > 0.02 and sx_ < float(w) - 0.02:
+						var ci_ := clampi(int(floor(sx_)), 0, w - 1)
+						var hh2 := qb * (1.0 - absf(sx_ * W - (float(ci_) + 0.5) * W) / (W * 0.5))
+						if hh2 > 2.0:
+							ci.draw_line(Vector2(sx_ * W, y0 - hh2), Vector2(sx_ * W, y0 + hh2), Color(0, 0.15, 0, 0.45), 2.0)
+				if base == Board.BARRIER:
+					objs.append([xl, "stone", k])
+	# ---- 3. cube rims on top of the surface keep every cube individually readable
+	for c in w:
+		Art.cube_rim(ci, Vector2((float(c) + 0.5) * W, y0), W)
+	# ---- 4. objects riding the surface (stone blocks, flies) -- clipped to the row's extent by the row control
 	for fi in b.flies.size():
 		var f: Dictionary = b.flies[fi]
-		if int(f["r"]) != r:
+		if int(f["r"]) == r and b.fly_state(fi, sim.t) != Board.NO_FLY:
+			objs.append([fposmod(float(int(f["k"])) + 0.5 + raw, float(b.L[r])), "fly", fi])
+	objs.sort_custom(func(a, c): return a[0] < c[0])
+	for o in objs:
+		var xo: float = o[0]
+		if xo < -0.6 or xo > float(w) + 0.6:
 			continue
-		var st := b.fly_state(fi, sim.t)
-		if st == Board.NO_FLY:
-			continue
-		var kk: int = f["k"]
-		var xl3 := fposmod(float(kk) + 0.5 + raw, float(b.L[r]))
-		if xl3 < -0.6 or xl3 > w + 0.6:
-			continue
-		var fp := Vector2(xl3 * W, y_top + r * P - org.y - W * 0.42 + sin(time * 6.0 + kk) * 3.0)
-		Art.draw_fly(ci, fp, W * 0.5, st, b.fly_progress(fi, sim.t), time, float(kk))
+		if o[1] == "stone":
+			Art.stone_block(ci, Vector2(xo * W, y0), W)
+		else:
+			var fi2: int = o[2]
+			var fp := Vector2(xo * W, y0 - W * 0.42 + sin(time * 6.0 + float(fi2)) * 3.0)
+			Art.draw_fly(ci, fp, W * 0.5, b.fly_state(fi2, sim.t), b.fly_progress(fi2, sim.t), time, float(fi2))
 	if show_row_numbers:
-		ci.draw_string(font, Vector2(2, y_top + r * P - org.y + 6), "R%d" % (r + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 0.3))
+		ci.draw_string(font, Vector2(2, y0 + 6), "R%d" % (r + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 0.3))
 
 # ------------------------------------------------------------------ drawing: overlay (frog, effects, HUD)
 
@@ -247,6 +337,7 @@ func draw_overlay(ci: Node2D) -> void:
 		Art.draw_miss(ci, p + Vector2(0, -W * 0.3), u, time, sin(sim.mode_t * 12.0) * 4.0)
 	else:
 		Art.draw_miss(ci, p + Vector2(0, -W * 0.3), u, time)
+	_aim_preview(ci)
 	_frog(ci)
 	_shots(ci)
 	for q in parts:
@@ -260,7 +351,25 @@ func draw_overlay(ci: Node2D) -> void:
 		_labels(ci)
 	if caption != "":
 		_caption(ci)
+	if show_sprites:
+		_sprite_sheet(ci)
 	_hud(ci)
+
+func _sprite_sheet(ci: Node2D) -> void:
+	ci.draw_rect(Rect2(Vector2.ZERO, vsize), Color(0.02, 0.05, 0.12, 0.96))
+	_txt(ci, "FROGERT FACINGS (swipe -> hop/aim diagonal)", Vector2(0, 150), 30, Color("ffe14d"), HORIZONTAL_ALIGNMENT_CENTER, vsize.x)
+	var names := ["UP  (up-right)", "RIGHT  (down-right)", "DOWN  (down-left)", "LEFT  (up-left)"]
+	var dirs := [Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1)]
+	for i in 4:
+		var col := i % 2
+		var row := i / 2
+		var c := Vector2(vsize.x * (0.27 + 0.46 * col), 380.0 + row * 420.0)
+		var d: Vector2 = dirs[i]
+		var u := 85.0
+		Art.cube(ci, c + Vector2(0, 70), 220.0, 60.0, Color("66c24c"), Color("22592a"), Color("30803a"))
+		var tip := Vector2(d.x * 120.0, d.y * 105.0)
+		Art.draw_frog(ci, c, u, d, Art.C_FROG, 0.0, tip if (int(time * 1.5) % 2 == 0) else null, 0.0, time)
+		_txt(ci, names[i], Vector2(c.x - 160, c.y + 200), 24, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, 320.0)
 
 func _caption(ci: Node2D) -> void:
 	var y := vsize.y - 190.0
@@ -286,6 +395,22 @@ func _labels(ci: Node2D) -> void:
 	var fv: Array = sim.frog_view()
 	ci.draw_string(font, Vector2(10, vsize.y - 296), "frog row R%d  x=%.2f" % [sim.frog_r + 1, b.local_x(sim.frog_r, sim.frog_rel, sim.t)], HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.8, 0.9, 1))
 
+## While holding a fly: outline the cubes the shot would clear (1/2/3 by fly age), along the facing diagonal.
+func _aim_preview(ci: Node2D) -> void:
+	if sim.mode != SimC.Mode.PLAY or sim.carry_age < 0.0 or sim.hopping:
+		return
+	var rng := sim.stage_range()
+	var col: Color = [Color("ffe14d"), Color("ffe14d"), Color("ff9d00"), Color("ff3030")][clampi(rng, 0, 3)]
+	for j in range(1, rng + 1):
+		var tg := sim._facing_cube(j)
+		if tg.size() != 3:
+			break
+		var c := cube_screen(tg[0], tg[1])
+		var a := W * 0.5
+		var bq := W * 0.25
+		var pulse := 0.5 + 0.5 * sin(time * 8.0)
+		ci.draw_polyline(PackedVector2Array([c + Vector2(0, -bq), c + Vector2(a, 0), c + Vector2(0, bq), c + Vector2(-a, 0), c + Vector2(0, -bq)]), Color(col.r, col.g, col.b, 0.45 + 0.4 * pulse), 3.0)
+
 func _frog(ci: Node2D) -> void:
 	var fv: Array = sim.frog_view()
 	var row_f: float = fv[0]
@@ -306,7 +431,7 @@ func _frog(ci: Node2D) -> void:
 	if sim.tongue_t > 0.0:
 		var tt := 1.0 - sim.tongue_t / 0.26
 		var ext := sin(clampf(tt, 0.0, 1.0) * PI)
-		var tp := slot_screen(sim.tongue_r, sim.tongue_k) + Vector2(0, -W * 0.3)
+		var tp := cube_screen(sim.tongue_r, sim.tongue_c) + Vector2(0, -W * 0.3)
 		var want := tp - p
 		if not sim.tongue_hit and want.length() > W * 1.7:
 			want = want.normalized() * W * 1.2
@@ -324,7 +449,7 @@ func _frog(ci: Node2D) -> void:
 	if sim.floating:
 		Art.ell_line(ci, foot, u * (1.0 + 0.1 * sin(time * 8.0)), u * 0.42, Color(0.8, 0.95, 1.0, 0.8), 3.0)
 		Art.ell_line(ci, foot, u * (1.4 + 0.12 * sin(time * 8.0 + 1.0)), u * 0.6, Color(0.8, 0.95, 1.0, 0.4), 2.0)
-	Art.draw_frog(ci, p, u, sim.face, tint, puff, tongue, squash, time)
+	Art.draw_frog(ci, p, u, Vector2(sim.face_hop()), tint, puff, tongue, squash, time)
 	if sim.carry_age >= 0.0:
 		var frac := clampf(sim.carry_age / float(sim.tun["fly_t3"]), 0.0, 1.0)
 		var col := Color(0.3, 1.0, 0.3).lerp(Color(1.0, 0.1, 0.1), frac)
@@ -337,18 +462,18 @@ func _dying_frog(ci: Node2D, p: Vector2, u: float, tint: Color, puff: float) -> 
 	match sim.death_cause:
 		"pop":
 			if s < 0.12:
-				Art.draw_frog(ci, p, u * (1.0 + s * 9.0), sim.face, Color("ff1010"), 1.0, null, 0.0, time)
+				Art.draw_frog(ci, p, u * (1.0 + s * 9.0), Vector2(sim.face_hop()), Color("ff1010"), 1.0, null, 0.0, time)
 			else:
 				ci.draw_arc(p, u * (1.5 + s * 5.0), 0, TAU, 28, Color(1, 0.6, 0.2, 1.0 - s), 6.0)
 		"fell":
 			var q := p + Vector2(0, s * 300.0)
-			Art.draw_frog(ci, q, u * (1.0 - s * 0.7), sim.face, tint.darkened(s * 0.5), puff, null, 0.0, time, true)
+			Art.draw_frog(ci, q, u * (1.0 - s * 0.7), Vector2(sim.face_hop()), tint.darkened(s * 0.5), puff, null, 0.0, time, true)
 		"fly":
-			Art.draw_frog(ci, p + Vector2(0, -sin(s * PI) * 40.0), u, sim.face, Color("ff6a6a"), puff, null, 0.0, time, true)
+			Art.draw_frog(ci, p + Vector2(0, -sin(s * PI) * 40.0), u, Vector2(sim.face_hop()), Color("ff6a6a"), puff, null, 0.0, time, true)
 		_:
 			var sink := clampf(s * 1.4, 0.0, 1.0)
 			var q2 := p + Vector2(0, sink * u * 1.1)
-			Art.draw_frog(ci, q2, u * (1.0 - sink * 0.4), sim.face, tint.lerp(Color("1457a8"), sink), puff, null, 0.0, time, true)
+			Art.draw_frog(ci, q2, u * (1.0 - sink * 0.4), Vector2(sim.face_hop()), tint.lerp(Color("1457a8"), sink), puff, null, 0.0, time, true)
 			for i in 3:
 				Art.ell_line(ci, p + Vector2(0, u * 0.8), u * (0.5 + s * 2.0 + i * 0.4), u * (0.22 + s * 0.6 + i * 0.12), Color(0.8, 0.95, 1.0, (1.0 - s) * 0.6), 2.5)
 
@@ -358,7 +483,7 @@ func _shots(ci: Node2D) -> void:
 		var targets: Array = s["targets"]
 		var pts: Array = [spos(float(s["from_r"]), float(s["from_wx"])) + Vector2(0, -W * 0.3)]
 		for tg in targets:
-			pts.append(slot_screen(tg[0], tg[1]) + Vector2(0, -W * 0.3))
+			pts.append(cube_screen(tg[0], tg[1]) + Vector2(0, -W * 0.3))
 		var f := (sim.t - float(s["t0"])) * ps
 		if f < 0.0 or pts.size() < 2:
 			continue
@@ -399,7 +524,7 @@ func _hud(ci: Node2D) -> void:
 	_txt(ci, str(maxi(hi_score, int(sess["score"]))), Vector2(vsize.x * 0.5 - 80, 76), 34, Color("ffe14d"), HORIZONTAL_ALIGNMENT_CENTER, 160.0)
 	_txt(ci, "LEVEL %d" % int(sess["level"]), Vector2(vsize.x - 24 - 150, 40), 22, Color("b6ff00"), HORIZONTAL_ALIGNMENT_RIGHT, 150.0)
 	for i in int(sess["lives"]):
-		Art.draw_frog(ci, Vector2(vsize.x - 40 - i * 46, 78), 15.0, 1, Art.C_FROG, 0.0, null, 0.0, time)
+		Art.draw_frog(ci, Vector2(vsize.x - 40 - i * 46, 78), 15.0, Vector2(1, 1), Art.C_FROG, 0.0, null, 0.0, time)
 	# time bar
 	var lim := float(sim.tun["time_limit"])
 	if lim > 0.0:

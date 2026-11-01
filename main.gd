@@ -57,6 +57,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--level" in args:
 		start_level_arg = int(args[args.find("--level") + 1])
+	if "--sprites" in args:
+		view.show_sprites = true
 	if "--labels" in args:
 		view.show_labels = true
 		view.show_row_numbers = true

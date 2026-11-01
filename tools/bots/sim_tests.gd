@@ -33,6 +33,35 @@ func run(sim: SimC, seconds: float) -> void:
 		sim.step(1.0 / 60.0)
 		sim.events.clear()
 
+## Calm arena: 6 rows (0 summit .. 5 start), widths 3..8, every conveyor slot a pad; `speed` for row 3; optional water band on row 2.
+func _arena_level(speed3: float = 0.0, water_row2: bool = false) -> Dictionary:
+	var rows: Array = []
+	for r in 6:
+		var w := 3 + r
+		var L := w + 4 if (r > 0 and r < 5) else w
+		var sl: Array = []
+		var sp: Array = []
+		for k in L:
+			sl.append(Board.PAD)
+			sp.append(0.0)
+		if water_row2 and r == 2:
+			for k in L:
+				sl[k] = Board.WATER
+		rows.append({"idx": r, "w": w, "L": L, "speed": speed3 if r == 3 else 0.0, "phase": 0.0, "slots": sl, "sinkph": sp, "kind": "ground"})
+	return {"level": 1, "attempt": 0, "seed": 0, "n_rows": 6, "rows": rows, "flies": [], "tun_gen": 0}
+
+func _arena_sim(lv: Dictionary, tun: Dictionary) -> SimC:
+	var sess := Session.make(tun)
+	var sim := SimC.new(tun, sess)
+	sim.start_level(1, 0, lv)
+	to_play(sim)
+	return sim
+
+## put the frog on cube c of row r (centre of that cube)
+func _place(sim: SimC, r: int, c: int) -> void:
+	sim.frog_r = r
+	sim.frog_rel = float(c) + 0.5 - sim.board.raw(r, sim.t)
+
 func to_play(sim: SimC) -> void:
 	run(sim, SimC.READY_TIME + 0.05)
 
@@ -114,24 +143,75 @@ func _init() -> void:
 	var fresh := Session.make(Tuning.make())
 	check(int(fresh["lives"]) == 3 and int(fresh["score"]) == 0, "new game: 3 lives, nothing carried over")
 
-	print("== hop physics")
-	var h := new_sim(1, {"hop_time": 0.18})
-	to_play(h)
-	var r0 := h.frog_r
-	h.swipe(0, -1)
-	check(h.hopping, "swipe starts a hop")
-	run(h, 0.3)
-	check(h.frog_r == r0 - 1 or h.mode == SimC.Mode.DYING, "hop moves one row up (or lands in water)")
-	var pf := new_sim(1)
-	to_play(pf)
-	pf.swipe(-1, 0, true)
-	check(pf.pref == -1 and not pf.hopping and pf.face == SimC.Face.LEFT, "B + swipe left turns the frog (and side preference) without hopping")
-	pf.swipe(1, 1)
-	check(not pf.hopping or pf.hop_dir == Vector2i(1, 0), "diagonal input is ignored/normalised (4-way only)")
-	var hb := new_sim(1)
-	to_play(hb)
-	hb.swipe(0, 1)
-	check(not hb.hopping, "cannot hop below the start row")
+	print("== NES-style four-neighbour hops on the fixed cube grid")
+	var arena := _arena_level()
+	var tun_a := Tuning.make()
+	tun_a["time_limit"] = 0.0
+	var hs := {"up": Vector2i(1, -1), "right": Vector2i(1, 1), "down": Vector2i(-1, 1), "left": Vector2i(-1, -1)}
+	var swipes := {"up": Vector2i(0, -1), "right": Vector2i(1, 0), "down": Vector2i(0, 1), "left": Vector2i(-1, 0)}
+	# From the middle of row 3 of the calm arena (all pads, still rows): each swipe lands on exactly one neighbour cube.
+	var exp := {"up": [2, 3], "right": [4, 4], "down": [4, 3], "left": [2, 2]}   # [row, cube] from (row 3, cube 3)
+	for nm in swipes:
+		var q := _arena_sim(arena, tun_a)
+		_place(q, 3, 3)
+		q.swipe(swipes[nm].x, swipes[nm].y)
+		run(q, 0.25)
+		check(q.frog_r == exp[nm][0] and q.frog_cube() == exp[nm][1], "swipe %s hops to the %s neighbour -> row %d cube %d" % [nm, ["up-right", "down-right", "down-left", "up-left"][["up", "right", "down", "left"].find(nm)], q.frog_r, q.frog_cube()])
+	# facing never changes where an ordinary swipe goes
+	var f1 := _arena_sim(arena, tun_a)
+	_place(f1, 3, 3)
+	f1.swipe(-1, 0, true)           # B + swipe left: turn only
+	check(not f1.hopping and f1.face == SimC.Face.LEFT and f1.frog_r == 3, "B + swipe turns without hopping")
+	f1.swipe(0, -1)                 # ordinary swipe up, previously facing LEFT
+	run(f1, 0.25)
+	check(f1.frog_r == 2 and f1.frog_cube() == 3, "swipe UP still goes up-right regardless of previous facing")
+	check(not ("pref" in f1), "no hidden preferred-side variable")
+	# the four swipes make a closed loop
+	var lp := _arena_sim(arena, tun_a)
+	_place(lp, 3, 3)
+	for nm in ["up", "right", "down", "left"]:
+		lp.swipe(swipes[nm].x, swipes[nm].y)
+		run(lp, 0.25)
+	check(lp.frog_r == 3 and lp.frog_cube() == 3, "UP, RIGHT, DOWN, LEFT returns to the start cube")
+	# remapping is purely configuration
+	var tun_b := tun_a.duplicate(true)
+	tun_b["hop_map"] = {"up": [-1, -1], "left": [-1, 1], "down": [1, 1], "right": [1, -1]}
+	var rm := _arena_sim(arena, tun_b)
+	_place(rm, 3, 3)
+	rm.swipe(0, -1)
+	run(rm, 0.25)
+	check(rm.frog_r == 2 and rm.frog_cube() == 2, "hop_map remaps swipe UP to up-left without code changes")
+	# edges
+	var ed := _arena_sim(arena, tun_a)
+	_place(ed, 3, 0)
+	ed.swipe(-1, 0)                 # up-left from the left-most cube leaves the pyramid
+	run(ed, 0.3)
+	check(ed.mode == SimC.Mode.DYING and ed.death_cause == "fell", "hopping off the pyramid edge = fall")
+	var bt := _arena_sim(arena, tun_a)
+	_place(bt, 5, 3)                # bottom row
+	bt.swipe(0, 1)
+	check(not bt.hopping and bt.mode == SimC.Mode.PLAY, "cannot hop below the bottom row (no accidental death)")
+	# conveyor carry + fall off the edge
+	var cv := _arena_sim(_arena_level(1.0), tun_a)
+	_place(cv, 3, 3)
+	var x0: float = cv.board.local_x(3, cv.frog_rel, cv.t)
+	run(cv, 1.0)
+	var x1: float = cv.board.local_x(3, cv.frog_rel, cv.t)
+	check(absf((x1 - x0) - 1.0) < 0.05, "standing frog is carried 1.0 cube/s with the row (moved %.3f)" % (x1 - x0))
+	var guard := 0
+	while cv.mode == SimC.Mode.PLAY and guard < 60 * 12:
+		cv.step(1.0 / 60.0); cv.events.clear(); guard += 1
+	check(cv.mode == SimC.Mode.DYING and cv.death_cause == "fell", "carried beyond the pyramid edge = fall (after %.1fs)" % cv.t)
+	# landing samples the moving surface at the destination cube centre
+	var wt := _arena_sim(_arena_level(0.0, true), tun_a)
+	_place(wt, 3, 3)
+	wt.swipe(0, -1)                 # up-right lands on row 2, cube 3 -> water there, no fly
+	run(wt, 0.25)
+	check(wt.mode == SimC.Mode.DYING and wt.death_cause == "drown", "landing on water drowns")
+	var hb := _arena_sim(arena, tun_a)
+	_place(hb, 5, 3)
+	hb.swipe(0, -1)
+	check(hb.hopping, "swipe starts a hop")
 
 	print("== skilled bot clears levels 1-6 without dying")
 	for lv in range(1, 7):

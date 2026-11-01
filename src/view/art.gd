@@ -42,80 +42,70 @@ static func fuse_tint(stage: int, age: float, t1: float, t2: float, t3: float, t
 			base = Color("ffffff").lerp(base, 0.35)
 	return base
 
-## u = half body size in pixels. tint = body colour. puff 0..1 cheeks. tongue: tip offset in px or null.
-static func draw_frog(ci: CanvasItem, p: Vector2, u: float, face: int, tint: Color, puff: float, tongue: Variant, squash: float, time: float, dead: bool = false) -> void:
+## Where the mouth is, relative to the frog's centre, for a facing d = (hx, hy) with hx,hy in {-1,+1}.
+static func mouth_offset(d: Vector2, u: float) -> Vector2:
+	return Vector2(d.x * 0.78 * u, d.y * 0.34 * u + (0.1 * u if d.y > 0.0 else -0.22 * u))
+
+## Three-quarter-view frog. d = facing diagonal (the hop direction of the last swipe/aim):
+##   (+1,-1) up-right = back view looking right     (-1,-1) up-left = back view looking left
+##   (+1,+1) down-right = front view looking right  (-1,+1) down-left = front view looking left
+## u = half body size in px.  puff 0..1 = cheek inflation.  tongue: tip offset in px or null.
+static func draw_frog(ci: CanvasItem, p: Vector2, u: float, d: Vector2, tint: Color, puff: float, tongue: Variant, squash: float, time: float, dead: bool = false) -> void:
 	var sx := 1.0 + squash * 0.12
 	var sy := 1.0 - squash * 0.12
-	var d := Vector2.ZERO
-	match face:
-		0: d = Vector2(0, -1)
-		1: d = Vector2(0, 1)
-		2: d = Vector2(-1, 0)
-		3: d = Vector2(1, 0)
-	var side := face >= 2
+	var front := d.y > 0.0
 	var dark := tint.darkened(0.35)
-	# back legs
-	if side:
-		ell(ci, p + Vector2(-d.x * 0.35 * u, 0.45 * u), 0.55 * u * sx, 0.3 * u * sy, dark)
-	else:
-		ell(ci, p + Vector2(-0.75 * u, 0.35 * u), 0.3 * u, 0.5 * u, dark)
-		ell(ci, p + Vector2(0.75 * u, 0.35 * u), 0.3 * u, 0.5 * u, dark)
+	# rear legs (tucked behind / beside the body)
+	ell(ci, p + Vector2(-d.x * 0.55 * u, 0.5 * u), 0.5 * u, 0.3 * u * sy, dark)
+	ell(ci, p + Vector2(d.x * 0.1 * u, 0.58 * u), 0.42 * u, 0.26 * u * sy, dark)
 	# body
-	var brx := (0.95 if side else 0.78) * u * sx
-	var bry := (0.62 if side else 0.7) * u * sy
+	var brx := 0.92 * u * sx
+	var bry := 0.66 * u * sy
 	ell(ci, p, brx + 2.0, bry + 2.0, C_OUT)
 	ell(ci, p, brx, bry, tint)
-	if face == 1:
-		ell(ci, p + Vector2(0, 0.12 * u), 0.5 * u, 0.42 * u, C_BELLY.lerp(tint, 0.25))
-	elif face == 0:
-		for sp in [Vector2(-0.3, 0.1), Vector2(0.28, 0.25), Vector2(0.0, -0.1)]:
-			ell(ci, p + sp * u, 0.12 * u, 0.1 * u, dark, 8)
-	# cheeks (inflated when holding a fly)
-	var cheek_r := (0.16 + 0.34 * puff) * u
-	var cheek_c: Array = []
-	match face:
-		0, 1: cheek_c = [Vector2(-0.62 * u, d.y * 0.42 * u), Vector2(0.62 * u, d.y * 0.42 * u)]
-		_: cheek_c = [Vector2(d.x * 0.5 * u, 0.18 * u), Vector2(d.x * 0.15 * u, 0.28 * u)]
-	if puff > 0.0:
-		for c in cheek_c:
-			ell(ci, p + c, cheek_r + 2.0, cheek_r + 2.0, C_OUT, 14)
-			ell(ci, p + c, cheek_r, cheek_r, tint.lightened(0.18), 14)
-			ell(ci, p + c + Vector2(-cheek_r * 0.3, -cheek_r * 0.3), cheek_r * 0.3, cheek_r * 0.25, Color(1, 1, 1, 0.45), 8)
-	# eyes
-	var eye_r := 0.26 * u
-	var eyes: Array = []
-	match face:
-		0: eyes = [Vector2(-0.42 * u, -0.5 * u), Vector2(0.42 * u, -0.5 * u)]
-		1: eyes = [Vector2(-0.42 * u, -0.5 * u), Vector2(0.42 * u, -0.5 * u)]
-		_: eyes = [Vector2(d.x * 0.38 * u, -0.5 * u), Vector2(-d.x * 0.1 * u, -0.55 * u)]
-	for e in eyes:
-		ell(ci, p + e, eye_r + 2.0, eye_r + 2.0, C_OUT, 14)
-		ell(ci, p + e, eye_r, eye_r, Color.WHITE, 14)
-		var pup := Vector2(d.x * 0.1 * u, d.y * 0.12 * u)
-		if dead:
-			ci.draw_line(p + e - Vector2(5, 5), p + e + Vector2(5, 5), C_OUT, 3.0)
-			ci.draw_line(p + e - Vector2(5, -5), p + e + Vector2(5, -5), C_OUT, 3.0)
-		else:
-			ell(ci, p + e + pup, eye_r * 0.5, eye_r * 0.5, C_OUT, 10)
-	# MOUTH -- always on the facing side so the firing direction is unmistakable
-	var mc := p + d * 0.78 * u
-	if side:
-		mc = p + Vector2(d.x * 0.92 * u, 0.12 * u)
-	var open := 0.0
-	if tongue != null:
-		open = 1.0
-	if side:
-		var w := 0.34 * u
-		ci.draw_colored_polygon(PackedVector2Array([mc, mc + Vector2(-d.x * w, -0.1 * u - open * 0.1 * u), mc + Vector2(-d.x * w, 0.18 * u + open * 0.14 * u)]), Color("5a0f1c"))
-		ci.draw_line(mc + Vector2(-d.x * 0.45 * u, 0.02 * u), mc + Vector2(-d.x * 0.02 * u, 0.02 * u), C_OUT, 2.5)
-	elif face == 0:
-		ci.draw_colored_polygon(PackedVector2Array([mc + Vector2(-0.3 * u, 0.08 * u), mc + Vector2(0.3 * u, 0.08 * u), mc + Vector2(0, -0.14 * u - open * 0.1 * u)]), Color("5a0f1c"))
-		ci.draw_line(mc + Vector2(-0.45 * u, 0.1 * u), mc + Vector2(0.45 * u, 0.1 * u), C_OUT, 2.5)
+	if front:
+		ell(ci, p + Vector2(d.x * 0.18 * u, 0.2 * u), 0.5 * u, 0.36 * u, C_BELLY.lerp(tint, 0.25))
 	else:
-		var mm := p + Vector2(0, 0.33 * u)
-		ci.draw_arc(mm, 0.38 * u, 0.15, PI - 0.15, 14, C_OUT, 3.0)
-		if open > 0.0:
-			ell(ci, mm + Vector2(0, 0.05 * u), 0.24 * u, 0.16 * u, Color("5a0f1c"), 10)
+		for sp in [Vector2(-0.35, 0.05), Vector2(0.25, 0.2), Vector2(-0.05, -0.15)]:
+			ell(ci, p + sp * u, 0.11 * u, 0.09 * u, dark, 8)
+	# head, shifted toward the facing diagonal
+	var hc := p + Vector2(d.x * 0.3 * u, (0.12 if front else -0.18) * u)
+	ell(ci, hc, 0.7 * u + 2.0, 0.52 * u + 2.0, C_OUT)
+	ell(ci, hc, 0.7 * u, 0.52 * u, tint.lightened(0.04))
+	# cheeks
+	var cheek_r := (0.15 + 0.34 * puff) * u
+	if puff > 0.0:
+		for sgn in [-1.0, 1.0]:
+			var cc: Vector2 = hc + Vector2(sgn * 0.62 * u, 0.2 * u)
+			ell(ci, cc, cheek_r + 2.0, cheek_r + 2.0, C_OUT, 14)
+			ell(ci, cc, cheek_r, cheek_r, tint.lightened(0.18), 14)
+			ell(ci, cc + Vector2(-cheek_r * 0.3, -cheek_r * 0.3), cheek_r * 0.3, cheek_r * 0.25, Color(1, 1, 1, 0.45), 8)
+	# eyes on top of the head
+	var er := 0.24 * u
+	for sgn in [-1.0, 1.0]:
+		var ec: Vector2 = hc + Vector2(sgn * 0.36 * u + d.x * 0.08 * u, -0.42 * u)
+		ell(ci, ec, er + 2.0, er + 2.0, C_OUT, 14)
+		ell(ci, ec, er, er, Color.WHITE if (front or dead) else tint.lightened(0.25), 14)
+		if dead:
+			ci.draw_line(ec - Vector2(5, 5), ec + Vector2(5, 5), C_OUT, 3.0)
+			ci.draw_line(ec - Vector2(5, -5), ec + Vector2(5, -5), C_OUT, 3.0)
+		elif front:
+			ell(ci, ec + Vector2(d.x * 0.1 * u, 0.04 * u), er * 0.5, er * 0.5, C_OUT, 10)
+		else:
+			ell(ci, ec + Vector2(-sgn * 0.05 * u, -0.05 * u), er * 0.32, er * 0.28, Color(1, 1, 1, 0.55), 8)
+	# MOUTH / snout: always on the facing side so the firing direction is unmistakable
+	var mc := p + mouth_offset(d, u)
+	var open := 1.0 if tongue != null else 0.0
+	var inside := Vector2(-d.x, 0.0)
+	if front:
+		# side-on grin ending in an open wedge toward the facing side
+		ci.draw_colored_polygon(PackedVector2Array([mc, mc + inside * 0.42 * u + Vector2(0, -0.12 * u - open * 0.1 * u), mc + inside * 0.42 * u + Vector2(0, 0.18 * u + open * 0.14 * u)]), Color("5a0f1c"))
+		ci.draw_line(mc + inside * 0.7 * u + Vector2(0, 0.0), mc, C_OUT, 3.0)
+	else:
+		# seen from behind: a snout poking out toward the facing side with the mouth line on its tip
+		ell(ci, mc + Vector2(-d.x * 0.12 * u, 0.0), 0.3 * u, 0.2 * u, tint.lightened(0.1), 12)
+		ci.draw_colored_polygon(PackedVector2Array([mc + Vector2(d.x * 0.1 * u, -0.02 * u), mc + Vector2(-d.x * 0.25 * u, -0.1 * u - open * 0.08 * u), mc + Vector2(-d.x * 0.25 * u, 0.12 * u + open * 0.1 * u)]), Color("5a0f1c"))
+		ci.draw_arc(mc + Vector2(-d.x * 0.12 * u, 0.0), 0.3 * u, 0.0, TAU, 14, C_OUT, 1.5)
 	# tongue
 	if tongue != null:
 		var tip: Vector2 = p + (tongue as Vector2)
@@ -179,11 +169,12 @@ static func draw_stone(ci: CanvasItem, p: Vector2, u: float, alpha: float) -> vo
 
 static func draw_miss(ci: CanvasItem, p: Vector2, u: float, time: float, hop: float = 0.0) -> void:
 	var q := p + Vector2(0, -abs(sin(time * 3.0)) * u * 0.25 - hop)
-	draw_frog(ci, q, u, 1, Color("ff8fc8"), 0.0, null, 0.0, time)
+	draw_frog(ci, q, u, Vector2(1, 1), Color("ff8fc8"), 0.0, null, 0.0, time)
 	# bow, lashes, blush
-	ell(ci, q + Vector2(-0.18 * u, -0.88 * u), 0.2 * u, 0.13 * u, Color("ff3d9a"), 8)
-	ell(ci, q + Vector2(0.18 * u, -0.88 * u), 0.2 * u, 0.13 * u, Color("ff3d9a"), 8)
-	ell(ci, q + Vector2(0, -0.88 * u), 0.08 * u, 0.08 * u, Color("c2185b"), 6)
+	var bo := Vector2(-0.3 * u, -0.78 * u)
+	ell(ci, q + bo + Vector2(-0.18 * u, 0), 0.2 * u, 0.13 * u, Color("ff3d9a"), 8)
+	ell(ci, q + bo + Vector2(0.18 * u, 0), 0.2 * u, 0.13 * u, Color("ff3d9a"), 8)
+	ell(ci, q + bo, 0.08 * u, 0.08 * u, Color("c2185b"), 6)
 	for sgn in [-1.0, 1.0]:
 		ci.draw_line(q + Vector2(sgn * 0.5 * u, -0.7 * u), q + Vector2(sgn * 0.72 * u, -0.82 * u), C_OUT, 2.0)
 		ell(ci, q + Vector2(sgn * 0.5 * u, -0.1 * u), 0.14 * u, 0.09 * u, Color(1, 0.4, 0.5, 0.6), 8)
@@ -211,8 +202,18 @@ static func cube(ci: CanvasItem, c: Vector2, W: float, H: float, top: Color, lef
 	ci.draw_polyline(PackedVector2Array([Lf, Lf + dh]), edge, 1.5)
 	ci.draw_polyline(PackedVector2Array([R, R + dh]), edge, 1.5)
 	ci.draw_line(B, B + dh, edge, 1.5)
-	ci.draw_polyline(PackedVector2Array([Lf, T, R]), Color(1, 1, 1, 0.28), 1.5)
-	ci.draw_polyline(PackedVector2Array([Lf, B, R]), Color(0, 0, 0, 0.22), 1.5)
+	cube_rim(ci, c, W)
+
+## Edge definition of a cube top; drawn AFTER the moving surface so the cube stays readable.
+static func cube_rim(ci: CanvasItem, c: Vector2, W: float) -> void:
+	var a := W * 0.5
+	var b := W * 0.25
+	var T := c + Vector2(0, -b)
+	var R := c + Vector2(a, 0)
+	var B := c + Vector2(0, b)
+	var Lf := c + Vector2(-a, 0)
+	ci.draw_polyline(PackedVector2Array([Lf, T, R]), Color(1, 1, 1, 0.3), 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, B, R]), Color(0, 0, 0, 0.28), 1.5)
 
 ## Recessed water cell: back walls visible, water surface sunk by d below the rim.
 static func water_pit(ci: CanvasItem, c: Vector2, W: float, H: float, d: float, time: float, phase: float, side_l: Color, side_r: Color) -> void:

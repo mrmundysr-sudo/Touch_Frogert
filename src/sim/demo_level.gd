@@ -21,21 +21,21 @@ static func make() -> Dictionary:
 	rows.append(_row(6, "start", "PPPPPPPPP", 0.0))
 	return {"level": 1, "attempt": 0, "seed": 0, "n_rows": 7, "rows": rows, "flies": [], "tun_gen": 0}
 
-## Scripted swipes: ["hop", dx, dy] waits until the landing is safe; ["wait", seconds].
+const Hopmap = preload("res://src/sim/hopmap.gd")
+
+## Scripted swipes: ["swipe", dx, dy] waits (up to 3s) until the landing is safe; ["climb"] swipes toward the row's middle
+## (UP = up-right, LEFT = up-left); ["wait", seconds].
 const SCRIPT := [
 	["wait", 1.2],
-	["hop", 0, -1], ["wait", 1.5],        # UP onto a ground row (moves right) and ride it
-	["hop", -1, 0], ["wait", 0.35],       # LEFT along the row (against the drift)
-	["hop", -1, 0], ["wait", 0.35],
-	["hop", 1, 0], ["wait", 0.5],         # RIGHT
-	["center"], ["hop", 0, -1], ["wait", 1.2],   # UP onto the river row (moves left): carried left
-	["hop", 0, 1], ["wait", 0.5],         # DOWN: retreat to the lower, wider row
-	["center"], ["hop", 0, -1], ["wait", 0.2],
-	["center"], ["hop", 0, -1], ["wait", 0.2],
-	["center"], ["hop", 0, -1], ["wait", 0.2],
-	["center"], ["hop", 0, -1], ["wait", 0.2],
-	["center"], ["hop", 0, -1], ["wait", 2.2],
+	["climb"], ["wait", 2.2],                       # onto the first conveyor row and ride it
+	["swipe", 0, -1], ["wait", 0.7],                # UP    -> up-right
+	["swipe", 1, 0], ["wait", 0.7],                 # RIGHT -> down-right
+	["swipe", 0, 1], ["wait", 0.7],                 # DOWN  -> down-left
+	["swipe", -1, 0], ["wait", 1.6],                # LEFT  -> up-left  (back where we started)
+	["climb"], ["wait", 0.3], ["climb"], ["wait", 0.3], ["climb"], ["wait", 0.3],
+	["climb"], ["wait", 0.3], ["climb"], ["wait", 2.4],
 ]
+const CAPTIONS := {"up": "SWIPE UP  =  hop up-right", "right": "SWIPE RIGHT  =  hop down-right", "down": "SWIPE DOWN  =  hop down-left", "left": "SWIPE LEFT  =  hop up-left"}
 
 var caption := ""
 var caption_dir := Vector2i.ZERO
@@ -44,50 +44,62 @@ var idx := 0
 var wait_left := 0.0
 var give_up := 0.0
 
-## Call every frame before sim.step. Returns a short caption of the current action for the demo overlay.
-func act(sim) -> String:
+func _safe(sim, sx: int, sy: int) -> bool:
+	var hv := Hopmap.hop_for_swipe(sim.tun, sx, sy)
+	var pr: PackedFloat64Array = sim.board.plan_hop(sim.frog_r, sim.frog_rel, hv.x, hv.y, sim.t, sim.hop_dur)
+	return int(pr[0]) == 0 and sim.board.landing_result(int(pr[1]), pr[2], sim.t + sim.hop_dur, false) == sim.board.R_OK
+
+func _do(sim, sx: int, sy: int) -> void:
+	sim.swipe(sx, sy)
+	caption = CAPTIONS[Hopmap.name_of(sx, sy)]
+	caption_dir = Vector2i(sx, sy)
+	caption_t = 0.9
+
+## Call every frame before sim.step.
+func act(sim) -> void:
 	caption_t = maxf(0.0, caption_t - 1.0 / 60.0)
 	if caption_t <= 0.0 and sim.mode == sim.Mode.PLAY and not sim.hopping and sim.frog_r > 0 and sim.frog_r < sim.board.n - 1:
 		var v: float = sim.board.speed[sim.frog_r]
 		caption = "RIDING THE CONVEYOR  %s" % ("-->" if v > 0.0 else "<--")
 		caption_dir = Vector2i(1 if v > 0.0 else -1, 0)
 	if sim.mode != sim.Mode.PLAY or idx >= SCRIPT.size():
-		return ""
+		return
 	var step_: Array = SCRIPT[idx]
 	if step_[0] == "wait":
 		wait_left += 1.0 / 60.0
 		if wait_left >= float(step_[1]):
 			wait_left = 0.0
 			idx += 1
-		return ""
+		return
 	if sim.hopping or sim.lock_t > 0.0:
-		return ""
-	if step_[0] == "center":
-		# nudge back toward the middle of the row so the conveyor drift never carries the demo frog off the edge
-		var xl: float = sim.board.local_x(sim.frog_r, sim.frog_rel, sim.t)
-		var mid := float(sim.board.w[sim.frog_r]) * 0.5
-		idx += 1
-		if absf(xl - mid) > 1.3 and not sim.hopping:
-			var cdx := -1 if xl > mid else 1
-			var cpr: PackedFloat64Array = sim.board.plan_hop(sim.frog_r, sim.frog_rel, cdx, 0, sim.t, sim.hop_dur)
-			if int(cpr[0]) == 0 and sim.board.landing_result(int(cpr[1]), cpr[2], sim.t + sim.hop_dur, false) == sim.board.R_OK:
-				sim.swipe(cdx, 0)
-				caption = "SWIPE LEFT" if cdx < 0 else "SWIPE RIGHT"
-				caption_dir = Vector2i(cdx, 0)
-				caption_t = 0.7
-		return ""
-	var dx: int = step_[1]
-	var dy: int = step_[2]
-	var pr: PackedFloat64Array = sim.board.plan_hop(sim.frog_r, sim.frog_rel, dx, dy, sim.t, sim.hop_dur, 0.25 * float(sim.pref) if dx == 0 else 0.0)
-	var ok: bool = int(pr[0]) == 0 and sim.board.landing_result(int(pr[1]), pr[2], sim.t + sim.hop_dur, false) == sim.board.R_OK
+		return
 	give_up += 1.0 / 60.0
-	if ok or give_up > 3.0:
-		give_up = 0.0
-		idx += 1
-		if ok:
-			sim.swipe(dx, dy)
-			caption = {Vector2i(0, -1): "SWIPE UP", Vector2i(0, 1): "SWIPE DOWN", Vector2i(-1, 0): "SWIPE LEFT", Vector2i(1, 0): "SWIPE RIGHT"}[Vector2i(dx, dy)]
-			caption_dir = Vector2i(dx, dy)
-			caption_t = 0.9
-			return ""
-	return ""
+	var sx := 0
+	var sy := 0
+	if step_[0] == "climb":
+		var mid := float(int(sim.board.w[sim.frog_r]) - 1) * 0.5
+		if float(sim.frog_cube()) < mid:
+			sx = 0; sy = -1          # UP = up-right
+		else:
+			sx = -1; sy = 0          # LEFT = up-left
+		if not _safe(sim, sx, sy):
+			# try the other upward swipe if the preferred one is not safe right now
+			var ax := -1 if sy != 0 else 0
+			var ay := 0 if sy != 0 else -1
+			if _safe(sim, ax, ay) and give_up > 0.6:
+				sx = ax; sy = ay
+			else:
+				if give_up > 3.0:
+					give_up = 0.0
+					idx += 1
+				return
+	else:
+		sx = int(step_[1]); sy = int(step_[2])
+		if not _safe(sim, sx, sy):
+			if give_up > 3.0:
+				give_up = 0.0
+				idx += 1
+			return
+	give_up = 0.0
+	idx += 1
+	_do(sim, sx, sy)

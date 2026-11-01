@@ -48,7 +48,7 @@ func act(sim) -> void:
 		var dy: int = step_[2]
 		var aim: bool = int(step_[3]) == 1
 		if p_mistake > 0.0 and not aim and rng.randf() < p_mistake:
-			var d: Vector2i = Planner.DIRS[rng.randi() % 4]
+			var d: Vector2i = [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)][rng.randi() % 4]
 			dx = d.x; dy = d.y
 			plan.clear()          # lost the plan after a slip; re-think next frame
 		else:
@@ -62,7 +62,7 @@ func _replan(sim) -> void:
 	var start_t: float = sim.t + reaction * rng.randf_range(0.6, 1.4)
 	if profile == "skilled":
 		start_t = sim.t
-	var res := Planner.solve(b, hop, sim.frog_r, sim.frog_rel, start_t, minf(horizon + 30.0 if profile == "skilled" else horizon, 60.0), margin, 300000, true, sim.pref)
+	var res := Planner.solve(b, hop, sim.frog_r, sim.frog_rel, start_t, minf(horizon + 30.0 if profile == "skilled" else horizon, 60.0), margin, 300000, true, sim.tun)
 	var steps: Array = res["plan"]
 	if steps.is_empty():
 		return
