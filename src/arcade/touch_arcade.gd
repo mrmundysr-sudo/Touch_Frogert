@@ -1,13 +1,13 @@
 extends Node
 ## TouchArcade: reusable invisible touch controller for Touch Arcade games.
-##  * Directional swipes (8-way) anywhere outside the action regions.
+##  * Directional swipes (4-way, NES style) anywhere outside the action regions.
 ##  * Up to N invisible, user-movable/resizable action regions (Frogert uses two: A and B).
 ##  * Real multitouch: every finger is tracked independently by touch index.
 ##  * Hold actions (is_held), tap actions (action_pressed) and configurable combos.
 ##  * Left/right-handed layouts, per-game saved config, restore defaults.
 ## Nothing is drawn unless show_regions is on (setup/test screens or the optional overlay).
 
-signal swiped(dx: int, dy: int)                 # dx,dy in {-1,0,1}; dy=-1 is UP
+signal swiped(dx: int, dy: int)                 # exactly one of dx,dy is non-zero (4-way); dy=-1 is UP
 signal action_pressed(action: String)
 signal action_released(action: String)
 signal combo(combo_name: String)
@@ -175,19 +175,13 @@ func _check_swipe(t: Dictionary) -> void:
 	var d: Vector2 = t["last"] - t["start"]
 	if d.length() < thr:
 		return
-	var ang := rad_to_deg(atan2(d.y, d.x))          # 0 = right, 90 = down (screen coords)
-	var sector := int(round(ang / 45.0))             # -4..4
+	# NES-style 4-way: the dominant axis wins, so a slightly diagonal swipe still means one clear direction
 	var dx := 0
 	var dy := 0
-	match sector:
-		0: dx = 1
-		1: dx = 1; dy = 1
-		2: dy = 1
-		3: dx = -1; dy = 1
-		4, -4: dx = -1
-		-3: dx = -1; dy = -1
-		-2: dy = -1
-		-1: dx = 1; dy = -1
+	if absf(d.x) >= absf(d.y):
+		dx = 1 if d.x > 0.0 else -1
+	else:
+		dy = 1 if d.y > 0.0 else -1
 	t["start"] = t["last"]        # re-anchor: a continuing drag can chain another hop
 	swiped.emit(dx, dy)
 
@@ -213,7 +207,7 @@ func _release(name: String) -> void:
 	held[name] = false
 	action_released.emit(name)
 
-# desktop keyboard (testing): arrows/WASD + QEZC diagonals, Space/J = A, Shift/K = B
+# desktop keyboard (testing): arrows/WASD, Space/J = A, Shift/K = B
 func _key(ev: InputEventKey) -> void:
 	var k: int = ev.physical_keycode
 	if ev.pressed:
@@ -223,10 +217,6 @@ func _key(ev: InputEventKey) -> void:
 			KEY_DOWN, KEY_S: d = Vector2i(0, 1)
 			KEY_LEFT, KEY_A: d = Vector2i(-1, 0)
 			KEY_RIGHT, KEY_D: d = Vector2i(1, 0)
-			KEY_Q: d = Vector2i(-1, -1)
-			KEY_E: d = Vector2i(1, -1)
-			KEY_Z: d = Vector2i(-1, 1)
-			KEY_C: d = Vector2i(1, 1)
 		if d != Vector2i.ZERO:
 			swiped.emit(d.x, d.y)
 			return

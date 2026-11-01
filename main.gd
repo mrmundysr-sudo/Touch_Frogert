@@ -9,6 +9,7 @@ const TouchArcade = preload("res://src/arcade/touch_arcade.gd")
 const AudioBank = preload("res://src/audio/audio.gd")
 const Bot = preload("res://src/sim/bot.gd")
 const Setup = preload("res://src/arcade/controller_setup.gd")
+const DemoLevel = preload("res://src/sim/demo_level.gd")
 
 enum S { TITLE, PLAY }
 const STEP := 1.0 / 60.0
@@ -25,6 +26,8 @@ var hi_score := 0
 var title_t := 0.0
 var bot: Bot = null          # attract/autoplay driver
 var autoplay := false
+var demo: DemoLevel = null
+var start_level_arg := 1
 var setup: Setup
 var setup_layer: CanvasLayer
 
@@ -51,26 +54,39 @@ func _ready() -> void:
 	setup.closed.connect(func(): title_t = 0.0)
 	_load_hi()
 	get_window().min_size = Vector2i(360, 640)
-	if "--autoplay" in OS.get_cmdline_user_args():
+	var args := OS.get_cmdline_user_args()
+	if "--level" in args:
+		start_level_arg = int(args[args.find("--level") + 1])
+	if "--labels" in args:
+		view.show_labels = true
+		view.show_row_numbers = true
+	if "--demo" in args:
+		demo = DemoLevel.new()
+		new_game(DemoLevel.make())
+	elif "--autoplay" in args:
 		autoplay = true
+		var prof := "average"
+		var i := args.find("--autoplay")
+		if i + 1 < args.size() and not str(args[i + 1]).begins_with("--"):
+			prof = args[i + 1]
 		new_game()
-		bot = Bot.new(OS.get_cmdline_user_args()[-1] if OS.get_cmdline_user_args().size() > 1 and OS.get_cmdline_user_args()[-1] != "--autoplay" else "average", 77)
+		bot = Bot.new(prof, 77)
 
 func _load_hi() -> void:
 	var cf := ConfigFile.new()
 	if cf.load("user://frogert.cfg") == OK:
 		hi_score = int(cf.get_value("game", "hi", 0))
 
-func new_game() -> void:
+func new_game(custom: Dictionary = {}) -> void:
 	session = Session.make(tun)
-	start_level(1)
+	start_level(start_level_arg, custom)
 	state = S.PLAY
 	audio.sfx("start")
 	audio.play_music("play")
 
-func start_level(lv: int) -> void:
+func start_level(lv: int, custom: Dictionary = {}) -> void:
 	sim = SimC.new(tun, session)
-	sim.start_level(lv, 0, LevelGen.for_game(tun, lv))
+	sim.start_level(lv, 0, custom if not custom.is_empty() else LevelGen.for_game(tun, lv))
 	view.sim = sim
 	view.hi_score = hi_score
 
@@ -107,6 +123,10 @@ func _process(delta: float) -> void:
 		acc -= STEP
 		if bot:
 			bot.act(sim)
+		if demo:
+			demo.act(sim)
+			view.caption = demo.caption
+			view.caption_dir = demo.caption_dir
 		sim.step(STEP)
 		_handle_events()
 		if sim.finished_win:

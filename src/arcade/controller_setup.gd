@@ -110,9 +110,10 @@ func _drag(idx: int, p: Vector2) -> void:
 			var v: Vector2 = p - (d["start"] as Vector2)
 			var thr := arcade.swipe_threshold * minf(size.x, size.y)
 			if v.length() >= thr:
-				var ang := rad_to_deg(atan2(v.y, v.x))
-				var names := {0: "RIGHT", 1: "DOWN-RIGHT", 2: "DOWN", 3: "DOWN-LEFT", 4: "LEFT", -4: "LEFT", -3: "UP-LEFT", -2: "UP", -1: "UP-RIGHT"}
-				last_swipe = names[int(round(ang / 45.0))]
+				if absf(v.x) >= absf(v.y):
+					last_swipe = "RIGHT" if v.x > 0.0 else "LEFT"
+				else:
+					last_swipe = "DOWN" if v.y > 0.0 else "UP"
 				last_swipe_t = 1.0
 				d["start"] = p
 	queue_redraw()

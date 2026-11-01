@@ -39,6 +39,7 @@ var hop_to_rel := 0.0
 var hop_to_wx := 0.0
 var hop_launch_t := 0.0
 var hop_dir := Vector2i.ZERO
+var pref := 1                    # preferred side (-1 left / +1 right) when hopping up or down a staggered row
 var best_row := 0
 var carry_age := -1.0
 var floating := false
@@ -83,6 +84,7 @@ func _reset_level_state() -> void:
 	frog_rel = Board.start_rel(board.w[frog_r])
 	best_row = frog_r
 	face = Face.UP
+	pref = 1
 	hopping = false
 	carry_age = -1.0
 	floating = false
@@ -172,10 +174,14 @@ static func face_from(dx: int, dy: int) -> int:
 	return Face.LEFT if dx < 0 else Face.RIGHT
 
 func swipe(dx: int, dy: int, aim: bool = false) -> void:
+	if dx != 0 and dy != 0:
+		dx = 0                      # controls are strictly 4-way
 	if mode != Mode.PLAY or (dx == 0 and dy == 0):
 		return
 	if aim:
 		face = face_from(dx, dy)
+		if dx != 0:
+			pref = dx
 		_emit("turn")
 		return
 	if hopping or lock_t > 0.0 or bonk_t > 0.0:
@@ -194,7 +200,9 @@ func press_a() -> void:
 
 func _try_hop(dx: int, dy: int) -> void:
 	face = face_from(dx, dy)
-	var pr := board.plan_hop(frog_r, frog_rel, dx, dy, t, hop_dur)
+	if dx != 0:
+		pref = dx
+	var pr := board.plan_hop(frog_r, frog_rel, dx, dy, t, hop_dur, 0.25 * float(pref))
 	if int(pr[0]) == 2:
 		_emit("bump")
 		return

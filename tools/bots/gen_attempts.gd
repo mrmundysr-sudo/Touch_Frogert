@@ -9,7 +9,7 @@ func _init() -> void:
 	var tun := Tuning.make()
 	var out := {"_gen_hash": Tuning.gen_hash(tun)}
 	for lv in range(1, last + 1):
-		var l := LevelGen.generate_valid(tun, lv, 400)
+		var l := LevelGen.generate_valid(tun, lv, 150)
 		out[str(lv)] = int(l["attempt"])
 		print("level %d attempt %d route %.2fs hops %s" % [lv, l["attempt"], l.get("route_time", -1.0), l.get("route_hops", 0)])
 	var f := FileAccess.open("res://src/data/level_attempts.json", FileAccess.WRITE)

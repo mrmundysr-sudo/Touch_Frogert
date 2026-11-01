@@ -191,3 +191,82 @@ static func draw_miss(ci: CanvasItem, p: Vector2, u: float, time: float, hop: fl
 	var hy := -u * 1.3 - fmod(time * 20.0, 22.0)
 	ell(ci, q + Vector2(-0.08 * u, hy / u * u), 0.1 * u, 0.1 * u, Color("ff3d71"), 8)
 	ell(ci, q + Vector2(0.08 * u, hy / u * u), 0.1 * u, 0.1 * u, Color("ff3d71"), 8)
+
+
+# ------------------------------------------------------------------ isometric cubes
+## A cube is centred on the middle of its TOP face c; W = cube width, H = side height.
+## top rhombus half-width a = W/2, half-height b = W/4 (2:1 isometric), side faces drop by H.
+static func cube(ci: CanvasItem, c: Vector2, W: float, H: float, top: Color, left: Color, right: Color, edge: Color = Color(0, 0, 0, 0.35)) -> void:
+	var a := W * 0.5
+	var b := W * 0.25
+	var T := c + Vector2(0, -b)
+	var R := c + Vector2(a, 0)
+	var B := c + Vector2(0, b)
+	var Lf := c + Vector2(-a, 0)
+	var dh := Vector2(0, H)
+	ci.draw_colored_polygon(PackedVector2Array([Lf, B, B + dh, Lf + dh]), left)
+	ci.draw_colored_polygon(PackedVector2Array([B, R, R + dh, B + dh]), right)
+	ci.draw_colored_polygon(PackedVector2Array([T, R, B, Lf]), top)
+	ci.draw_polyline(PackedVector2Array([Lf + dh, B + dh, R + dh]), edge, 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, Lf + dh]), edge, 1.5)
+	ci.draw_polyline(PackedVector2Array([R, R + dh]), edge, 1.5)
+	ci.draw_line(B, B + dh, edge, 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, T, R]), Color(1, 1, 1, 0.28), 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, B, R]), Color(0, 0, 0, 0.22), 1.5)
+
+## Recessed water cell: back walls visible, water surface sunk by d below the rim.
+static func water_pit(ci: CanvasItem, c: Vector2, W: float, H: float, d: float, time: float, phase: float, side_l: Color, side_r: Color) -> void:
+	var a := W * 0.5
+	var b := W * 0.25
+	var T := c + Vector2(0, -b)
+	var R := c + Vector2(a, 0)
+	var B := c + Vector2(0, b)
+	var Lf := c + Vector2(-a, 0)
+	var dh := Vector2(0, H)
+	# exterior front faces of the block (same as a cube) so the pit sits inside a solid
+	ci.draw_colored_polygon(PackedVector2Array([Lf, B, B + dh, Lf + dh]), side_l)
+	ci.draw_colored_polygon(PackedVector2Array([B, R, R + dh, B + dh]), side_r)
+	var s := a * (1.0 - d / (2.0 * b))
+	var T1 := Vector2(c.x, c.y + d - b)
+	var Rm := Vector2(c.x + s, c.y + d * 0.5)
+	var Lm := Vector2(c.x - s, c.y + d * 0.5)
+	ci.draw_colored_polygon(PackedVector2Array([Lf, T, T1, Lm]), Color("0a2a55"))      # back-left wall
+	ci.draw_colored_polygon(PackedVector2Array([T, R, Rm, T1]), Color("06193a"))       # back-right wall
+	var wc := C_WATER.lerp(C_WATER_L, 0.25 + 0.2 * sin(time * 2.0 + phase))
+	ci.draw_colored_polygon(PackedVector2Array([T1, Rm, B, Lm]), wc)
+	# ripples + glint
+	var rp := fposmod(time * 0.8 + phase, 1.0)
+	ell_line(ci, c + Vector2(0, d * 0.55), a * 0.55 * (0.4 + rp), b * 0.55 * (0.4 + rp), Color(1, 1, 1, 0.35 * (1.0 - rp)), 1.5, 14)
+	ci.draw_line(c + Vector2(-a * 0.25, d * 0.3), c + Vector2(a * 0.05, d * 0.3 - 1), Color(1, 1, 1, 0.35), 2.0)
+	ci.draw_polyline(PackedVector2Array([Lf, B, R]), Color(0, 0, 0, 0.35), 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, T, R]), Color(1, 1, 1, 0.18), 1.5)
+	ci.draw_polyline(PackedVector2Array([Lf, Lf + dh, B + dh, R + dh, R]), Color(0, 0, 0, 0.35), 1.5)
+
+## Lily pad lying on a cube's top face (iso-squashed ellipse).
+static func pad_on_top(ci: CanvasItem, c: Vector2, W: float, k: int, wobble: float, time: float, sink: bool) -> void:
+	var off := Vector2(sin(time * 30.0) * wobble * 2.5, 0.0)
+	var q := c + off + Vector2(0, -1)
+	var rx := W * 0.38
+	var ry := W * 0.17
+	ell(ci, q + Vector2(0, 2), rx, ry, C_PAD_D, 20)
+	ell(ci, q, rx * 0.94, ry * 0.9, C_PAD if not sink else Color("2fa26b"), 20)
+	var ang := float((k * 37) % 6) * 1.0472
+	var wedge := PackedVector2Array([q, q + Vector2(cos(ang - 0.2) * rx * 1.05, sin(ang - 0.2) * ry * 1.05), q + Vector2(cos(ang + 0.2) * rx * 1.05, sin(ang + 0.2) * ry * 1.05)])
+	ci.draw_colored_polygon(wedge, Color(0.2, 0.35, 0.3, 0.9))
+	ell_line(ci, q, rx * 0.55, ry * 0.5, Color(1, 1, 1, 0.2), 1.5, 14)
+	if k % 5 == 0 and not sink:
+		ell(ci, q + Vector2(rx * 0.3, -ry * 0.5), W * 0.07, W * 0.045, Color(1, 0.6, 0.85), 8)
+	if sink:
+		for i in 3:
+			ell(ci, q + Vector2((i - 1) * W * 0.12, -W * 0.05), W * 0.03, W * 0.02, Color(1, 1, 1, 0.6), 6)
+	if wobble > 0.0:
+		ell_line(ci, q, rx * (1.0 + wobble * 0.2), ry * (1.0 + wobble * 0.2), Color(1, 0.9, 0.3, 0.7), 2.0, 20)
+
+## Physical barrier: a carved stone block standing on the cube's top face.
+static func stone_block(ci: CanvasItem, c: Vector2, W: float) -> void:
+	var hs := W * 0.55
+	var bc := c + Vector2(0, -hs + 3)
+	ell(ci, c + Vector2(0, 2), W * 0.36, W * 0.15, Color(0, 0, 0, 0.3), 14)
+	cube(ci, bc, W * 0.66, hs, Color("c5c2de"), Color("6d6a8c"), Color("8d8aa8"), Color(0.1, 0.08, 0.2, 0.55))
+	ci.draw_line(bc + Vector2(-W * 0.1, W * 0.04), bc + Vector2(-W * 0.02, W * 0.2), Color(0.15, 0.12, 0.3, 0.6), 2.0)
+	ci.draw_line(bc + Vector2(-W * 0.02, W * 0.2), bc + Vector2(W * 0.1, W * 0.3), Color(0.15, 0.12, 0.3, 0.6), 2.0)

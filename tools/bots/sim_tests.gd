@@ -40,13 +40,18 @@ func _init() -> void:
 	print("== determinism")
 	var a := new_sim(2)
 	var b := new_sim(2)
-	var ba := Bot.new("average", 5)
-	var bb := Bot.new("average", 5)
-	for i in 60 * 20:
+	var ba := Bot.new("mistake", 5)
+	var bb := Bot.new("mistake", 5)
+	var trace_a := ""
+	var trace_b := ""
+	for i in 60 * 30:
 		ba.act(a); bb.act(b)
 		a.step(1.0 / 60.0); b.step(1.0 / 60.0)
 		a.events.clear(); b.events.clear()
-	check(JSON.stringify(a.log) == JSON.stringify(b.log) and a.log.size() > 3, "identical inputs -> identical event log (%d entries)" % a.log.size())
+		if i % 10 == 0:
+			trace_a += "%d,%.5f,%d|" % [a.frog_r, a.frog_rel, a.mode]
+			trace_b += "%d,%.5f,%d|" % [b.frog_r, b.frog_rel, b.mode]
+	check(trace_a == trace_b and trace_a.length() > 100 and JSON.stringify(a.log) == JSON.stringify(b.log), "identical inputs -> identical frame-by-frame trace and event log (%d log entries)" % a.log.size())
 	check(a.session["score"] == b.session["score"], "identical score")
 
 	print("== level generation reproducible")
@@ -117,6 +122,12 @@ func _init() -> void:
 	check(h.hopping, "swipe starts a hop")
 	run(h, 0.3)
 	check(h.frog_r == r0 - 1 or h.mode == SimC.Mode.DYING, "hop moves one row up (or lands in water)")
+	var pf := new_sim(1)
+	to_play(pf)
+	pf.swipe(-1, 0, true)
+	check(pf.pref == -1 and not pf.hopping and pf.face == SimC.Face.LEFT, "B + swipe left turns the frog (and side preference) without hopping")
+	pf.swipe(1, 1)
+	check(not pf.hopping or pf.hop_dir == Vector2i(1, 0), "diagonal input is ignored/normalised (4-way only)")
 	var hb := new_sim(1)
 	to_play(hb)
 	hb.swipe(0, 1)
@@ -167,7 +178,7 @@ func _controller_tests() -> void:
 	var B := Vector2(s.x * 0.4, s.y * 0.9)
 	# swipes: 8 directions from the centre of the swipe area
 	var c := Vector2(s.x * 0.3, s.y * 0.4)
-	var dirs := {Vector2i(0, -1): Vector2(0, -1), Vector2i(1, -1): Vector2(1, -1), Vector2i(1, 0): Vector2(1, 0), Vector2i(1, 1): Vector2(1, 1), Vector2i(0, 1): Vector2(0, 1), Vector2i(-1, 1): Vector2(-1, 1), Vector2i(-1, 0): Vector2(-1, 0), Vector2i(-1, -1): Vector2(-1, -1)}
+	var dirs := {Vector2i(0, -1): Vector2(0, -1), Vector2i(1, 0): Vector2(1, 0), Vector2i(0, 1): Vector2(0, 1), Vector2i(-1, 0): Vector2(-1, 0)}
 	var all_ok := true
 	for d in dirs:
 		_sw.clear()
@@ -176,7 +187,11 @@ func _controller_tests() -> void:
 		_touch(arc, 0, c + dirs[d] * 120.0, false)
 		if _sw.size() != 1 or _sw[0] != d:
 			all_ok = false
-	check(all_ok, "all 8 swipe directions recognised exactly once")
+	check(all_ok, "4 swipe directions recognised exactly once")
+	_sw.clear()
+	_sw.clear()
+	_touch(arc, 0, c, true); _drag_to(arc, 0, c + Vector2(100, 70)); _touch(arc, 0, c, false)
+	check(_sw.size() == 1 and _sw[0] == Vector2i(1, 0), "a diagonal-ish swipe resolves to its dominant axis (no diagonals)")
 	_sw.clear()
 	_touch(arc, 0, c, true); _drag_to(arc, 0, c + Vector2(5, 0)); _touch(arc, 0, c, false)
 	check(_sw.is_empty(), "tiny movement is not a swipe")

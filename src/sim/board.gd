@@ -119,8 +119,9 @@ func consume_fly(fi: int, t: float) -> void:
 func fly_at(r: int, k: int) -> int:
 	return fly_idx.get(r * 64 + k, -1)
 
-## Plan a hop. Returns [status, row2, rel2, slot2]; status 0 = go, 1 = blocked (barrier), 2 = no such row.
-func plan_hop(r: int, rel: float, dx: int, dy: int, t: float, hop: float) -> PackedFloat64Array:
+## Plan a hop (4-way: dy=-1 up, dy=+1 down, dx=-1/+1 sideways along the row). Returns [status, row2, rel2, slot2]; status 0 = go, 1 = blocked (barrier), 2 = no such row.
+## bias: for vertical hops, the aim point is shifted this many cells toward the frog's preferred side.
+func plan_hop(r: int, rel: float, dx: int, dy: int, t: float, hop: float, bias: float = 0.0) -> PackedFloat64Array:
 	var tl := t + hop
 	if dy == 0:
 		var rel2 := rel + float(dx)
@@ -132,7 +133,7 @@ func plan_hop(r: int, rel: float, dx: int, dy: int, t: float, hop: float) -> Pac
 	if r2 < 0 or r2 >= n:
 		return PackedFloat64Array([2.0, r, rel, 0])
 	var wx0 := rel + raw(r, t) - float(w[r]) * 0.5
-	var xa := wx0 + 0.5 * float(dx) + float(w[r2]) * 0.5
+	var xa := wx0 + bias + float(w[r2]) * 0.5
 	var u := fposmod(xa - raw(r2, tl), float(L[r2]))
 	var k2 := int(floor(u))
 	var xl := xa + (0.5 - (u - float(k2)))
