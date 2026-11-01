@@ -66,6 +66,9 @@ func apply_speeds(tun: Dictionary, t: float) -> void:
 		speed[r] = s
 		phase[r] = old_raw - s * t
 
+static func start_rel(width: int) -> float:
+	return floorf(float(width) * 0.5) + 0.5
+
 func raw(r: int, t: float) -> float:
 	return phase[r] + speed[r] * t
 

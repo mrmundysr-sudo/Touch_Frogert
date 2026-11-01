@@ -22,7 +22,7 @@ func _init() -> void:
 			var e := Tuning.for_level(tun, lv)
 			b.load_level(level, e)
 			var hop := float(e["hop_time"])
-			var r := Planner.solve(b, hop, b.n - 1, float(b.w[b.n - 1]) * 0.5, 0.0, float(e["max_route_time"]), margin)
+			var r := Planner.solve(b, hop, b.n - 1, Board.start_rel(b.w[b.n - 1]), 0.0, float(e["max_route_time"]), margin)
 			if r["ok"] and float(r["time"]) >= float(e["min_route_factor"]) * float(b.n - 1) * hop:
 				found = attempt; rt = r["time"]
 				break

@@ -107,7 +107,7 @@ static func generate_valid(tun_base: Dictionary, level: int, max_attempts: int =
 		var b := Board.new()
 		b.load_level(lv, tun)
 		var hop := float(tun["hop_time"])
-		var res: Dictionary = Planner.solve(b, hop, b.n - 1, float(b.w[b.n - 1]) * 0.5, 0.0, float(tun["max_route_time"]), float(tun["route_margin"]))
+		var res: Dictionary = Planner.solve(b, hop, b.n - 1, Board.start_rel(b.w[b.n - 1]), 0.0, float(tun["max_route_time"]), float(tun["route_margin"]))
 		if res["ok"] and float(res["time"]) >= float(tun["min_route_factor"]) * float(b.n - 1) * hop:
 			lv["route_time"] = res["time"]
 			lv["route_hops"] = res["plan"].size()

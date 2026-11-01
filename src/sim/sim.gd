@@ -80,7 +80,7 @@ func _reset_level_state() -> void:
 	mode = Mode.READY
 	mode_t = 0.0
 	frog_r = board.n - 1
-	frog_rel = float(board.w[frog_r]) * 0.5
+	frog_rel = Board.start_rel(board.w[frog_r])
 	best_row = frog_r
 	face = Face.UP
 	hopping = false
