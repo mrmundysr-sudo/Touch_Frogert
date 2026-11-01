@@ -8,6 +8,7 @@ const GameView = preload("res://src/view/game_view.gd")
 const TouchArcade = preload("res://src/arcade/touch_arcade.gd")
 const AudioBank = preload("res://src/audio/audio.gd")
 const Bot = preload("res://src/sim/bot.gd")
+const Setup = preload("res://src/arcade/controller_setup.gd")
 
 enum S { TITLE, PLAY }
 const STEP := 1.0 / 60.0
@@ -24,6 +25,8 @@ var hi_score := 0
 var title_t := 0.0
 var bot: Bot = null          # attract/autoplay driver
 var autoplay := false
+var setup: Setup
+var setup_layer: CanvasLayer
 
 func _ready() -> void:
 	tun = Tuning.make()
@@ -36,8 +39,16 @@ func _ready() -> void:
 		[{"name": "AB", "actions": ["A", "B"], "window": 0.15}])
 	arcade.swiped.connect(_on_swipe)
 	arcade.action_pressed.connect(_on_action)
+	add_child(arcade.make_overlay())
 	view = GameView.new()
 	add_child(view)
+	setup_layer = CanvasLayer.new()
+	setup_layer.layer = 100
+	add_child(setup_layer)
+	setup = Setup.new()
+	setup.visible = false
+	setup_layer.add_child(setup)
+	setup.closed.connect(func(): title_t = 0.0)
 	_load_hi()
 	get_window().min_size = Vector2i(360, 640)
 	if "--autoplay" in OS.get_cmdline_user_args():
@@ -63,6 +74,9 @@ func start_level(lv: int) -> void:
 	view.sim = sim
 	view.hi_score = hi_score
 
+func open_setup() -> void:
+	setup.open(arcade)
+
 func _on_swipe(dx: int, dy: int) -> void:
 	if state == S.TITLE:
 		new_game()
@@ -76,7 +90,13 @@ func _on_action(name: String) -> void:
 	if name == "A":
 		sim.press_a()
 
+func _unhandled_key_input(ev: InputEvent) -> void:
+	if ev is InputEventKey and ev.pressed and ev.keycode == KEY_F2 and not setup.visible:
+		open_setup()
+
 func _process(delta: float) -> void:
+	if setup.visible:
+		return
 	if state == S.TITLE:
 		title_t += delta
 		view.time += delta
@@ -121,6 +141,13 @@ func queue_redraw_title() -> void:
 		var l := Label.new()
 		l.name = "TitleLabel"
 		l.text = "TOUCH FROGERT\n\nSwipe to start"
+		var btn := Button.new()
+		btn.text = "CONTROLS"
+		btn.add_theme_font_size_override("font_size", 34)
+		btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		btn.position = Vector2(-110, -200)
+		btn.custom_minimum_size = Vector2(220, 80)
+		btn.pressed.connect(open_setup)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		l.add_theme_font_size_override("font_size", 56)
 		l.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -128,4 +155,5 @@ func queue_redraw_title() -> void:
 		var cl := CanvasLayer.new()
 		cl.name = "TitleLabel"
 		cl.add_child(l)
+		cl.add_child(btn)
 		add_child(cl)

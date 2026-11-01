@@ -26,6 +26,7 @@ var last_press_time := {}
 var touches := {}                  # index -> {kind, action, start, last}
 var key_dirs := {}
 var min_region := Vector2(0.14, 0.08)
+var overlay_ctl: Control = null
 
 func setup(id: String, action_defs: Array, defaults: Dictionary, combo_defs: Array = []) -> void:
 	game_id = id
@@ -80,19 +81,48 @@ func set_handed(h: String) -> void:
 		regions[n] = Rect2(1.0 - r.position.x - r.size.x, r.position.y, r.size.x, r.size.y)
 	save_config()
 
+var view_size_override := Vector2.ZERO   # tests / headless
+func _vsize() -> Vector2:
+	if view_size_override != Vector2.ZERO:
+		return view_size_override
+	return get_viewport().get_visible_rect().size
+
 func region_px(name: String) -> Rect2:
-	var s := get_viewport().get_visible_rect().size
+	var s := _vsize()
 	var r: Rect2 = regions[name]
 	return Rect2(r.position.x * s.x, r.position.y * s.y, r.size.x * s.x, r.size.y * s.y)
 
 func set_region_px(name: String, px: Rect2) -> void:
-	var s := get_viewport().get_visible_rect().size
+	var s := _vsize()
 	var minpx := Vector2(min_region.x * s.x, min_region.y * s.y)
 	var w := clampf(px.size.x, minpx.x, s.x)
 	var h := clampf(px.size.y, minpx.y, s.y)
 	var x := clampf(px.position.x, 0.0, s.x - w)
 	var y := clampf(px.position.y, 0.0, s.y - h)
 	regions[name] = Rect2(x / s.x, y / s.y, w / s.x, h / s.y)
+
+## Optional thin outlines drawn by a CanvasLayer overlay (off by default: no buttons cover the screen).
+func make_overlay() -> CanvasLayer:
+	var cl := CanvasLayer.new()
+	cl.layer = 50
+	var c := Control.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.draw.connect(func():
+		if not show_regions:
+			return
+		for a in actions:
+			var r := region_px(a["name"])
+			c.draw_rect(r, Color(1, 1, 1, 0.07 if not held.get(a["name"], false) else 0.25))
+			c.draw_rect(r, Color(1, 1, 1, 0.35), false, 2.0)
+			c.draw_string(ThemeDB.fallback_font, r.position + Vector2(0, r.size.y * 0.6), a["name"], HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 36, Color(1, 1, 1, 0.5)))
+	cl.add_child(c)
+	overlay_ctl = c
+	return cl
+
+func _process(_dt: float) -> void:
+	if show_regions and overlay_ctl != null:
+		overlay_ctl.queue_redraw()
 
 func is_held(name: String) -> bool:
 	return held.get(name, false)
@@ -140,7 +170,7 @@ func _input(ev: InputEvent) -> void:
 		_key(ev)
 
 func _check_swipe(t: Dictionary) -> void:
-	var s := get_viewport().get_visible_rect().size
+	var s := _vsize()
 	var thr := swipe_threshold * minf(s.x, s.y)
 	var d: Vector2 = t["last"] - t["start"]
 	if d.length() < thr:
