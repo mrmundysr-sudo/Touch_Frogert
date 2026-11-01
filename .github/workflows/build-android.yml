@@ -79,11 +79,14 @@ jobs:
           cat "$HOME/.config/godot/editor_settings-4.3.tres"
           ls "$ANDROID_HOME" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/ndk" || true
           ls -la "$HOME/debug.keystore"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/cmake" "$ANDROID_HOME/cmdline-tools/latest/bin" || true
+          java -version
 
       - name: Export debug APK
         run: |
           set -euo pipefail
           mkdir -p build
+          sed -i "s@^keystore/debug=.*@keystore/debug=\"$HOME/debug.keystore\"@; s@^keystore/debug_user=.*@keystore/debug_user=\"androiddebugkey\"@; s@^keystore/debug_password=.*@keystore/debug_password=\"android\"@" export_presets.cfg
           godot --headless --verbose --path . --export-debug "Android" build/Touch-Frogert-debug.apk
           ls -la build
           test -s build/Touch-Frogert-debug.apk
