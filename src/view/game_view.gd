@@ -28,13 +28,37 @@ var vsize := Vector2(720, 1280)
 var font: Font
 var row_ctls: Array = []
 var overlay: Node2D
+var cubes_layer: Node2D
+var surface_layer: Node2D
+var rims_layer: Node2D
 var built_rows := -1
+var static_key := ""
+var dia_cache := {}
+## render prototype switches:  pad_mode = clip (old: pads cut into cube tops) | whole (full objects) | film (whole + water film under)
+var pad_mode := "whole"
+var water_bridge := false
+var cache_static := true
+var bake_static := false           # render the stationary cubes/rims ONCE into textures (one quad each per frame)
+var bake_vps: Array = []
+var bake_sprites: Array = []
+var perf := {"surf": 0, "obj": 0, "ovl": 0, "cubes": 0, "frames": 0, "clips": 0}
 
+## Per-row control: draws the objects riding that row (pads, stone blocks, flies), clipped to the row's extent.
 class RowCtl extends Control:
 	var gv
 	var r := 0
 	func _draw() -> void:
-		gv.draw_row(self, r)
+		gv.draw_objects(self, r)
+
+## Whole-pyramid layers. "cubes" and "rims" are STATIC (retained: drawn once, redrawn only on layout/level change).
+class LayerNode extends Node2D:
+	var gv
+	var which := ""
+	func _draw() -> void:
+		match which:
+			"cubes": gv.draw_cubes(self)
+			"surface": gv.draw_surfaces(self)
+			"rims": gv.draw_rims(self)
 
 class Overlay extends Node2D:
 	var gv
@@ -52,8 +76,23 @@ func _ensure_rows() -> void:
 	for c in row_ctls:
 		c.queue_free()
 	row_ctls.clear()
-	if overlay.get_parent() != null:
-		remove_child(overlay)
+	for nd in [cubes_layer, surface_layer, rims_layer, overlay] + bake_sprites:
+		if nd != null and nd.get_parent() != null:
+			remove_child(nd)
+	if cubes_layer == null:
+		cubes_layer = LayerNode.new(); cubes_layer.gv = self; cubes_layer.which = "cubes"
+		surface_layer = LayerNode.new(); surface_layer.gv = self; surface_layer.which = "surface"
+		rims_layer = LayerNode.new(); rims_layer.gv = self; rims_layer.which = "rims"
+	# paint order: all cube bodies, then the moving surface, then cube rims, then objects riding the rows, then the frog/HUD overlay
+	if bake_static:
+		_make_baked()
+		add_child(bake_sprites[0])
+		add_child(surface_layer)
+		add_child(bake_sprites[1])
+	else:
+		add_child(cubes_layer)
+		add_child(surface_layer)
+		add_child(rims_layer)
 	for r in sim.board.n:
 		var c := RowCtl.new()
 		c.gv = self
@@ -64,6 +103,24 @@ func _ensure_rows() -> void:
 		row_ctls.append(c)
 	add_child(overlay)
 	built_rows = sim.board.n
+	static_key = ""
+
+func _make_baked() -> void:
+	if not bake_vps.is_empty():
+		return
+	for i in 2:
+		var vp := SubViewport.new()
+		vp.transparent_bg = true
+		vp.disable_3d = true
+		vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+		var layer: Node2D = cubes_layer if i == 0 else rims_layer
+		vp.add_child(layer)
+		add_child(vp)
+		var sp := Sprite2D.new()
+		sp.centered = false
+		sp.texture = vp.get_texture()
+		bake_vps.append(vp)
+		bake_sprites.append(sp)
 
 func layout() -> void:
 	vsize = get_viewport_rect().size
@@ -76,6 +133,16 @@ func layout() -> void:
 	y_top = 150.0 + above + maxf(0.0, (vsize.y - 150.0 - above - 260.0 - total) * 0.35)
 	cx = vsize.x * 0.5
 	_ensure_rows()
+	var key := "%d|%.2f|%.1f|%.1f|%s|%s" % [n, W, cx, y_top, str(sim.level.get("seed", 0)), str(sim.level.get("attempt", 0))]
+	if key != static_key:
+		static_key = key
+		dia_cache.clear()
+		cubes_layer.queue_redraw()
+		rims_layer.queue_redraw()
+		if bake_static:
+			for vp in bake_vps:
+				vp.size = Vector2i(int(vsize.x), int(vsize.y))
+				vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	for r in n:
 		var c: Control = row_ctls[r]
 		var w := float(sim.board.w[r])
@@ -146,7 +213,12 @@ func update(dt: float) -> void:
 		position = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 14.0 if shake > 0.0 else Vector2.ZERO
 		for c in row_ctls:
 			c.queue_redraw()
+		surface_layer.queue_redraw()
 		overlay.queue_redraw()
+		if not cache_static:
+			cubes_layer.queue_redraw()
+			rims_layer.queue_redraw()
+		perf["frames"] += 1
 	queue_redraw()
 
 # ------------------------------------------------------------------ drawing: backdrop (this node)
@@ -187,7 +259,7 @@ static func _area(poly: PackedVector2Array) -> float:
 
 ## Fill `poly` (a convex region in row-local px) clipped to the moving surface's cube tops.
 ## `dia` = cached diamond polygons per cube. Returns the clipped pieces so callers can add shading.
-func _fill_on_tops(ci: Control, dia: Array, poly: PackedVector2Array, xa: float, xb: float, col: Color, w: int) -> Array:
+func _fill_on_tops(ci: CanvasItem, dia: Array, poly: PackedVector2Array, xa: float, xb: float, col: Color, w: int) -> Array:
 	var pieces: Array = []
 	var c0 := maxi(0, int(floor(xa)))
 	var c1 := mini(w - 1, int(floor(xb - 0.0001)))
@@ -210,30 +282,59 @@ func _ellipse_poly(c: Vector2, rx: float, ry: float, n: int = 16) -> PackedVecto
 		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
 	return pts
 
-func draw_row(ci: Control, r: int) -> void:
+func _kind(r: int) -> String:
 	var b := sim.board
-	var w: int = b.w[r]
-	var is_start := r == b.n - 1
-	var is_top := r == 0
-	var kind: String = "start" if is_start else ("summit" if is_top else String(sim.level["rows"][r].get("kind", "ground")))
-	var pal := _palette(r, kind)
-	var org := ci.position
-	var y0 := y_top + r * P - org.y                     # local y of this row's top-face centres
+	if r == b.n - 1:
+		return "start"
+	if r == 0:
+		return "summit"
+	return String(sim.level["rows"][r].get("kind", "ground"))
+
+func _dia(w: int) -> Array:
+	if dia_cache.has(w):
+		return dia_cache[w]
 	var qb := W * 0.25
-	var moving: bool = not (is_start or is_top)
-	# ---- 1. permanent structure: fixed cubes (never move, never wrap)
-	var dia: Array = []
+	var out: Array = []
 	for c in w:
-		var cc := Vector2((float(c) + 0.5) * W, y0)
-		var shade := 1.0 if (c % 2 == 0) else 0.95
-		Art.cube(ci, cc, W, Hs, (pal[0] as Color) * Color(shade, shade, shade, 1.0), pal[1], pal[2])
-		dia.append(PackedVector2Array([cc + Vector2(0, -qb), cc + Vector2(W * 0.5, 0), cc + Vector2(0, qb), cc + Vector2(-W * 0.5, 0)]))
-	# ---- 2. moving playable surface, flush with the cube tops and clipped to them
-	var raw := b.raw(r, sim.t)
-	var objs: Array = []
-	if moving:
-		var Lr: int = b.L[r]
+		var cc := Vector2((float(c) + 0.5) * W, 0.0)
+		out.append(PackedVector2Array([cc + Vector2(0, -qb), cc + Vector2(W * 0.5, 0), cc + Vector2(0, qb), cc + Vector2(-W * 0.5, 0)]))
+	dia_cache[w] = out
+	return out
+
+## STATIC: the permanent pyramid bodies (never move, never wrap). Retained: redrawn only on layout/level change.
+func draw_cubes(ci: Node2D) -> void:
+	var t0 := Time.get_ticks_usec()
+	var b := sim.board
+	for r in b.n:
+		var w: int = b.w[r]
+		var pal := _palette(r, _kind(r))
+		var ox := cx - float(w) * W * 0.5
+		for c in w:
+			var shade := 1.0 if (c % 2 == 0) else 0.95
+			Art.cube(ci, Vector2(ox + (float(c) + 0.5) * W, y_top + r * P), W, Hs, (pal[0] as Color) * Color(shade, shade, shade, 1.0), pal[1], pal[2])
+	perf["cubes"] += Time.get_ticks_usec() - t0
+
+func draw_rims(ci: Node2D) -> void:
+	var b := sim.board
+	for r in b.n:
+		var w: int = b.w[r]
+		var ox := cx - float(w) * W * 0.5
+		for c in w:
+			Art.cube_rim(ci, Vector2(ox + (float(c) + 0.5) * W, y_top + r * P), W)
+
+## DYNAMIC: the moving surface texture (water gaps, ripples, ground stripes), clipped to the fixed cube tops.
+func draw_surfaces(ci: Node2D) -> void:
+	var t0 := Time.get_ticks_usec()
+	var b := sim.board
+	var qb := W * 0.25
+	for r in range(1, b.n - 1):
+		var w: int = b.w[r]
+		var kind := _kind(r)
 		var river := kind == "river"
+		var dia := _dia(w)
+		ci.draw_set_transform(Vector2(cx - float(w) * W * 0.5, y_top + r * P), 0.0, Vector2.ONE)
+		var raw := b.raw(r, sim.t)
+		var Lr: int = b.L[r]
 		for k in Lr:
 			var xl := fposmod(float(k) + 0.5 + raw, float(Lr))
 			if xl < -0.5 or xl > float(w) + 0.5:
@@ -242,74 +343,102 @@ func draw_row(ci: Control, r: int) -> void:
 			var xb := minf(xl + 0.5, float(w))
 			if xb - xa < 0.01:
 				continue
-			var base: int = b.slots[r][k]
 			var cont := b.content(r, k, sim.t)
-			var slab := _slab_poly(xa, xb, y0)
+			var slab := _slab_poly(xa, xb, 0.0)
 			if river:
-				# whole row is a pool; the surface layer is a scrolling ripple band + floating pads
 				if k % 2 == 0:
 					_fill_on_tops(ci, dia, slab, xa, xb, Color(WATER_RIP.r, WATER_RIP.g, WATER_RIP.b, 0.22), w)
-				if cont != Board.WATER:
-					var wob := b.sink_warning(r, k, sim.t)
-					var sunk := 1.0 if (base == Board.SINK and wob > 0.0) else 0.0
-					var pc := Vector2(xl * W + (sin(time * 30.0) * wob * 2.0), y0 - 1.0 + wob * W * 0.05)
-					var rx := W * (0.4 - 0.08 * wob)
-					var ry := W * (0.19 - 0.04 * wob)
-					var ring := _ellipse_poly(pc + Vector2(0, 2), rx + 2.0, ry + 1.5)
-					var body := _ellipse_poly(pc, rx, ry)
-					var padc := Color("39b54a") if base != Board.SINK else Color("2fa26b")
-					for c in range(maxi(0, int(floor(xl - 0.5))), mini(w - 1, int(floor(xl + 0.5))) + 1):
-						for piece in Geometry2D.intersect_polygons(dia[c], ring):
-							if piece.size() >= 3 and _area(piece) > 1.0:
-								ci.draw_colored_polygon(piece, Color("1f7a31"))
-						for piece in Geometry2D.intersect_polygons(dia[c], body):
-							if piece.size() >= 3 and _area(piece) > 1.0:
-								ci.draw_colored_polygon(piece, padc.lerp(Color("e8c23a"), wob * 0.6))
-					if k % 5 == 0 and base != Board.SINK:
-						var fl := _ellipse_poly(pc + Vector2(rx * 0.35, -ry * 0.5), W * 0.06, W * 0.04, 8)
-						var cf := clampi(int(floor(xl + 0.35)), 0, w - 1)
-						for piece in Geometry2D.intersect_polygons(dia[cf], fl):
-							if piece.size() >= 3 and _area(piece) > 0.5:
-								ci.draw_colored_polygon(piece, Color(1, 0.6, 0.85))
+				if pad_mode == "clip" and cont != Board.WATER:
+					_clipped_pad(ci, dia, r, k, xl, w)
 			else:
-				# ground row: green top; water gaps are bevelled blue slabs
 				if cont == Board.WATER:
 					var pieces := _fill_on_tops(ci, dia, slab, xa, xb, WATER_TOP, w)
 					for piece in pieces:
-						# recess illusion: dark shadow under the back rim + a light lip on the front rim
 						var sh_poly := PackedVector2Array()
 						for v in piece:
 							sh_poly.append(v + Vector2(0, W * 0.16))
 						for sp in Geometry2D.clip_polygons(piece, sh_poly):
 							if sp.size() >= 3 and _area(sp) > 1.0:
 								ci.draw_colored_polygon(sp, Color(0.0, 0.05, 0.25, 0.6))
-					# bevelled walls at the slab ends (vertical lines through the diamond)
+					if water_bridge:
+						# fill the notches above/below every cube seam inside the gap so the water stays ONE connected piece
+						for sv in range(maxi(1, int(ceil(xa - 0.0001))), mini(w - 1, int(floor(xb + 0.0001))) + 1):
+							var vx := float(sv) * W
+							var up := PackedVector2Array([Vector2(vx - W * 0.5, -qb), Vector2(vx, 0), Vector2(vx + W * 0.5, -qb)])
+							var dn := PackedVector2Array([Vector2(vx - W * 0.5, qb), Vector2(vx, 0), Vector2(vx + W * 0.5, qb)])
+							for tri in [up, dn]:
+								for piece in Geometry2D.intersect_polygons(tri, slab):
+									if piece.size() >= 3 and _area(piece) > 1.0:
+										ci.draw_colored_polygon(piece, Color(WATER_TOP.r, WATER_TOP.g, WATER_TOP.b, 0.92))
 					for ex in [xl - 0.5, xl + 0.5]:
 						if ex > 0.0 and ex < float(w):
 							var cidx := clampi(int(floor(ex)), 0, w - 1)
-							var cx_ := (float(cidx) + 0.5) * W
-							var hh := qb * (1.0 - absf(ex * W - cx_) / (W * 0.5))
+							var hh := qb * (1.0 - absf(ex * W - (float(cidx) + 0.5) * W) / (W * 0.5))
 							if hh > 2.0:
-								ci.draw_line(Vector2(ex * W, y0 - hh), Vector2(ex * W, y0 + hh), Color(0.02, 0.1, 0.3, 0.9), 3.0)
-								ci.draw_line(Vector2(ex * W + 2, y0 - hh), Vector2(ex * W + 2, y0 + hh), Color(1, 1, 1, 0.18), 1.5)
+								ci.draw_line(Vector2(ex * W, -hh), Vector2(ex * W, hh), Color(0.02, 0.1, 0.3, 0.9), 3.0)
+								ci.draw_line(Vector2(ex * W + 2, -hh), Vector2(ex * W + 2, hh), Color(1, 1, 1, 0.18), 1.5)
 				else:
 					if k % 2 == 0:
 						_fill_on_tops(ci, dia, slab, xa, xb, Color(1, 1, 0.8, 0.20), w)
 					else:
 						_fill_on_tops(ci, dia, slab, xa, xb, Color(0, 0.12, 0, 0.18), w)
-					# conveyor segment seam (vertical line through the diamond the seam is currently over)
 					var sx_ := xl - 0.5
 					if sx_ > 0.02 and sx_ < float(w) - 0.02:
 						var ci_ := clampi(int(floor(sx_)), 0, w - 1)
 						var hh2 := qb * (1.0 - absf(sx_ * W - (float(ci_) + 0.5) * W) / (W * 0.5))
 						if hh2 > 2.0:
-							ci.draw_line(Vector2(sx_ * W, y0 - hh2), Vector2(sx_ * W, y0 + hh2), Color(0, 0.15, 0, 0.45), 2.0)
-				if base == Board.BARRIER:
-					objs.append([xl, "stone", k])
-	# ---- 3. cube rims on top of the surface keep every cube individually readable
-	for c in w:
-		Art.cube_rim(ci, Vector2((float(c) + 0.5) * W, y0), W)
-	# ---- 4. objects riding the surface (stone blocks, flies) -- clipped to the row's extent by the row control
+							ci.draw_line(Vector2(sx_ * W, -hh2), Vector2(sx_ * W, hh2), Color(0, 0.15, 0, 0.45), 2.0)
+	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	perf["surf"] += Time.get_ticks_usec() - t0
+
+## OLD behaviour (pad_mode == "clip"), kept for before/after comparison: a pad cut into the diamonds it overlaps.
+func _clipped_pad(ci: Node2D, dia: Array, r: int, k: int, xl: float, w: int) -> void:
+	var b := sim.board
+	var base: int = b.slots[r][k]
+	var wob := b.sink_warning(r, k, sim.t)
+	var pc := Vector2(xl * W + (sin(time * 30.0) * wob * 2.0), -1.0 + wob * W * 0.05)
+	var rx := W * (0.4 - 0.08 * wob)
+	var ry := W * (0.19 - 0.04 * wob)
+	var ring := _ellipse_poly(pc + Vector2(0, 2), rx + 2.0, ry + 1.5)
+	var body := _ellipse_poly(pc, rx, ry)
+	var padc := Color("39b54a") if base != Board.SINK else Color("2fa26b")
+	for c in range(maxi(0, int(floor(xl - 0.5))), mini(w - 1, int(floor(xl + 0.5))) + 1):
+		perf["clips"] += 2
+		for piece in Geometry2D.intersect_polygons(dia[c], ring):
+			if piece.size() >= 3 and _area(piece) > 1.0:
+				ci.draw_colored_polygon(piece, Color("1f7a31"))
+		for piece in Geometry2D.intersect_polygons(dia[c], body):
+			if piece.size() >= 3 and _area(piece) > 1.0:
+				ci.draw_colored_polygon(piece, padc.lerp(Color("e8c23a"), wob * 0.6))
+
+## DYNAMIC: objects riding the row. Pads are drawn WHOLE here (never cut into cube tops); the row control
+## clips only at the pyramid's side edges so nothing hangs in empty space or pops when it wraps.
+func draw_objects(ci: Control, r: int) -> void:
+	var t0 := Time.get_ticks_usec()
+	var b := sim.board
+	if r == 0 or r == b.n - 1:
+		return
+	var w: int = b.w[r]
+	var kind := _kind(r)
+	var raw := b.raw(r, sim.t)
+	var y0 := y_top + r * P - ci.position.y
+	var objs: Array = []
+	if pad_mode != "clip" and kind == "river":
+		for k in int(b.L[r]):
+			var base: int = b.slots[r][k]
+			if base != Board.PAD and base != Board.SINK:
+				continue
+			if b.content(r, k, sim.t) == Board.WATER:
+				continue
+			var xl := fposmod(float(k) + 0.5 + raw, float(b.L[r]))
+			if xl < -0.6 or xl > float(w) + 0.6:
+				continue
+			objs.append([xl, "pad", k])
+	for k in int(b.L[r]):
+		if int(b.slots[r][k]) == Board.BARRIER:
+			var xs := fposmod(float(k) + 0.5 + raw, float(b.L[r]))
+			if xs > -0.6 and xs < float(w) + 0.6:
+				objs.append([xs, "stone", k])
 	for fi in b.flies.size():
 		var f: Dictionary = b.flies[fi]
 		if int(f["r"]) == r and b.fly_state(fi, sim.t) != Board.NO_FLY:
@@ -319,18 +448,32 @@ func draw_row(ci: Control, r: int) -> void:
 		var xo: float = o[0]
 		if xo < -0.6 or xo > float(w) + 0.6:
 			continue
-		if o[1] == "stone":
-			Art.stone_block(ci, Vector2(xo * W, y0), W)
-		else:
-			var fi2: int = o[2]
-			var fp := Vector2(xo * W, y0 - W * 0.42 + sin(time * 6.0 + float(fi2)) * 3.0)
-			Art.draw_fly(ci, fp, W * 0.5, b.fly_state(fi2, sim.t), b.fly_progress(fi2, sim.t), time, float(fi2))
+		match o[1]:
+			"pad":
+				var k2: int = o[2]
+				var wob := b.sink_warning(r, k2, sim.t)
+				var cc := Vector2(xo * W, y0 + wob * W * 0.05)
+				if pad_mode == "film":
+					Art.ell(ci, cc + Vector2(0, 1), W * 0.62, W * 0.27, Color(WATER_TOP.r, WATER_TOP.g, WATER_TOP.b, 0.95), 20)
+				Art.pad_on_top(ci, cc, W, k2, wob, time, int(b.slots[r][k2]) == Board.SINK)
+			"stone":
+				Art.stone_block(ci, Vector2(xo * W, y0), W)
+			_:
+				var fi2: int = o[2]
+				var fp := Vector2(xo * W, y0 - W * 0.42 + sin(time * 6.0 + float(fi2)) * 3.0)
+				Art.draw_fly(ci, fp, W * 0.5, b.fly_state(fi2, sim.t), b.fly_progress(fi2, sim.t), time, float(fi2))
 	if show_row_numbers:
 		ci.draw_string(font, Vector2(2, y0 + 6), "R%d" % (r + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 0.3))
+	perf["obj"] += Time.get_ticks_usec() - t0
+
+func perf_report() -> String:
+	var f := maxi(1, int(perf["frames"]))
+	return "perf over %d frames: surfaces %.2f ms/frame, objects %.2f ms/frame, static cubes %.2f ms total (%d redraws est), overlay %.2f ms/frame, polygon clips for pads %.1f/frame" % [f, float(perf["surf"]) / 1000.0 / f, float(perf["obj"]) / 1000.0 / f, float(perf["cubes"]) / 1000.0, 1, float(perf["ovl"]) / 1000.0 / f, float(perf["clips"]) / f]
 
 # ------------------------------------------------------------------ drawing: overlay (frog, effects, HUD)
 
 func draw_overlay(ci: Node2D) -> void:
+	var t0 := Time.get_ticks_usec()
 	var p := spos(0.0, 0.0)
 	var u := W * 0.52
 	if sim.mode == SimC.Mode.WIN:
@@ -354,6 +497,7 @@ func draw_overlay(ci: Node2D) -> void:
 	if show_sprites:
 		_sprite_sheet(ci)
 	_hud(ci)
+	perf["ovl"] += Time.get_ticks_usec() - t0
 
 func _sprite_sheet(ci: Node2D) -> void:
 	ci.draw_rect(Rect2(Vector2.ZERO, vsize), Color(0.02, 0.05, 0.12, 0.96))

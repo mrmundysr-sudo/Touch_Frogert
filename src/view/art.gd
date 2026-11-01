@@ -247,8 +247,8 @@ static func water_pit(ci: CanvasItem, c: Vector2, W: float, H: float, d: float, 
 static func pad_on_top(ci: CanvasItem, c: Vector2, W: float, k: int, wobble: float, time: float, sink: bool) -> void:
 	var off := Vector2(sin(time * 30.0) * wobble * 2.5, 0.0)
 	var q := c + off + Vector2(0, -1)
-	var rx := W * 0.38
-	var ry := W * 0.17
+	var rx := W * 0.45          # pad width: 90% of its conveyor slot, so pads stay distinct yet "on the pad" ~= "inside the slot"
+	var ry := W * 0.2
 	ell(ci, q + Vector2(0, 2), rx, ry, C_PAD_D, 20)
 	ell(ci, q, rx * 0.94, ry * 0.9, C_PAD if not sink else Color("2fa26b"), 20)
 	var ang := float((k * 37) % 6) * 1.0472

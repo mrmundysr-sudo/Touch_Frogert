@@ -57,6 +57,14 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--level" in args:
 		start_level_arg = int(args[args.find("--level") + 1])
+	if "--pad-mode" in args:
+		view.pad_mode = str(args[args.find("--pad-mode") + 1])
+	if "--bridge" in args:
+		view.water_bridge = true
+	if "--bake" in args:
+		view.bake_static = true
+	if "--no-cache" in args:
+		view.cache_static = false
 	if "--sprites" in args:
 		view.show_sprites = true
 	if "--labels" in args:
@@ -64,6 +72,11 @@ func _ready() -> void:
 		view.show_row_numbers = true
 	if "--demo" in args:
 		demo = DemoLevel.new()
+		var di := args.find("--demo")
+		if di + 1 < args.size() and not str(args[di + 1]).begins_with("--"):
+			match str(args[di + 1]):
+				"ride": demo.steps = DemoLevel.SCRIPT_RIDE
+				"edge": demo.steps = DemoLevel.SCRIPT_EDGE
 		new_game(DemoLevel.make())
 	elif "--autoplay" in args:
 		autoplay = true
@@ -140,6 +153,10 @@ func _process(delta: float) -> void:
 			audio.stop_music()
 			break
 	view.update(delta)
+
+func _exit_tree() -> void:
+	if "--perf" in OS.get_cmdline_user_args() and view != null:
+		print("PERF[", view.pad_mode, "/", "cache" if view.cache_static else "nocache", "] ", view.perf_report())
 
 func _handle_events() -> void:
 	for ev in sim.events:

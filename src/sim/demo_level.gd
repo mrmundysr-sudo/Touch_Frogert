@@ -35,8 +35,17 @@ const SCRIPT := [
 	["climb"], ["wait", 0.3], ["climb"], ["wait", 0.3], ["climb"], ["wait", 0.3],
 	["climb"], ["wait", 0.3], ["climb"], ["wait", 2.4],
 ]
+## Ride a lily pad across several cube seams (hop onto a river row, then stand still).
+const SCRIPT_RIDE := [
+	["wait", 1.0], ["climb"], ["wait", 0.5], ["climb"], ["wait", 4.5], ["climb"], ["wait", 3.0],
+]
+## Get carried off the pyramid edge by a conveyor and fall.
+const SCRIPT_EDGE := [
+	["wait", 1.0], ["climb"], ["wait", 9.0],
+]
 const CAPTIONS := {"up": "SWIPE UP  =  hop up-right", "right": "SWIPE RIGHT  =  hop down-right", "down": "SWIPE DOWN  =  hop down-left", "left": "SWIPE LEFT  =  hop up-left"}
 
+var steps: Array = SCRIPT
 var caption := ""
 var caption_dir := Vector2i.ZERO
 var caption_t := 0.0
@@ -62,9 +71,9 @@ func act(sim) -> void:
 		var v: float = sim.board.speed[sim.frog_r]
 		caption = "RIDING THE CONVEYOR  %s" % ("-->" if v > 0.0 else "<--")
 		caption_dir = Vector2i(1 if v > 0.0 else -1, 0)
-	if sim.mode != sim.Mode.PLAY or idx >= SCRIPT.size():
+	if sim.mode != sim.Mode.PLAY or idx >= steps.size():
 		return
-	var step_: Array = SCRIPT[idx]
+	var step_: Array = steps[idx]
 	if step_[0] == "wait":
 		wait_left += 1.0 / 60.0
 		if wait_left >= float(step_[1]):
