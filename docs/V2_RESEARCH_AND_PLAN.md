@@ -1,7 +1,7 @@
 # Touch Frogert — Arcade V2: Research Findings & Implementation Plan
 
-Status: **PROPOSAL — awaiting owner approval. No gameplay code has been changed.**
-Branch: `feature/frogert-arcade-v2` · Starting commit: `236d648` (branch == `main` + the two ROM ZIPs, commit `a coin of "Touch Developer push"`).
+Status: **APPROVED by owner.** Decisions: keep ROM ZIPs in repo (no history rewrite), package `com.mundymorningstudios.touchfrogert`, name "Touch Frogert".
+Branch: `feature/frogert-arcade-v2` · Starting commit: `236d648` (`main` at `2160160` plus two "Touch Developer push" commits that added only the two ROM ZIPs).
 
 The ROMs were used only as observation references (MAME 0.264, both sets verified "good"). Nothing was extracted, disassembled
 for reuse, or copied. This document records general principles and measured *behaviour*, not code, graphics, or sound.
@@ -11,8 +11,9 @@ for reuse, or copied. This document records general principles and measured *beh
 1. **The two ROM ZIPs are committed to a *public* repository** (`qbert 2.zip`, `frogger (1).zip`). That is redistribution of copyrighted
    ROMs, and they are now in git history. Recommend: remove them from the branch and purge history (needs a force-push / history rewrite,
    which I will NOT do without your explicit permission), and keep research ROMs out of the repo (local only).
-2. **They would ship inside the APK.** `export_presets.cfg` has `export_filter="all_resources"` and an empty `exclude_filter`, so Godot
-   would pack the ZIPs into the PCK. Fix before any further build: `exclude_filter="*.zip,research/*,docs/*,tools/*"` and add
+2. **Export guard.** (Update: testing showed Godot's `all_resources` mode does not export non-resource files such as `.zip`, so they were not
+   being packed. Exclusions were added anyway as defence in depth; see `tools/verify_no_rom_content.py`, which CI runs on the real APK.)
+   Original concern: `export_presets.cfg` had an empty `exclude_filter`. Fix before any further build: `exclude_filter="*.zip,research/*,docs/*,tools/*"` and add
    `*.zip`, `*.bin`, `*.rom` to `.gitignore`. (Every push currently triggers an APK build, so this applies to the very next push.)
 3. I have not deleted anything. The ZIPs remain in place until you say so.
 

@@ -3,3 +3,7 @@
 export/
 *.apk
 *.aab
+# research extractions must never be committed (the two source ZIPs are intentionally tracked as references)
+research/
+rom_extract/
+*.avi

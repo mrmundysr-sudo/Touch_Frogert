@@ -87,6 +87,12 @@ jobs:
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose build/Touch-Frogert-debug.apk
           "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging build/Touch-Frogert-debug.apk | head -5
 
+      - name: Verify APK contains no research ROM content
+        run: |
+          python3 tools/verify_no_rom_content.py build/Touch-Frogert-debug.apk --roms "qbert 2.zip" "frogger (1).zip"
+          echo "--- APK entries (top level) ---"
+          unzip -l build/Touch-Frogert-debug.apk | grep -viE "\.(xml|png|so|dex|arsc)$|META-INF|res/" | head -40
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:

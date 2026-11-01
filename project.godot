@@ -3,8 +3,8 @@ config_version=5
 
 [application]
 
-config/name="Neon Hopper"
-config/description="Original isometric hop-and-claim arcade game with a tongue-slinging frog."
+config/name="Touch Frogert"
+config/description="Touch Frogert - an original moving-pyramid arcade climb by Mundy Morning Studios."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://icon.svg"
